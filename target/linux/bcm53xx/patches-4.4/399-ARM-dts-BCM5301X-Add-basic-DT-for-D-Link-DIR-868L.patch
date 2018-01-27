@@ -1,0 +1,115 @@
+--- /dev/null	2017-08-19 07:40:38.216000000 +0800
++++ /arch/arm/boot/dts/bcm4708-dlink-dir-868l.dts	2017-08-20 18:18:04.039931844 +0800
+@@ -0,0 +1,100 @@
++/*
++ * Broadcom BCM470X / BCM5301X ARM platform code.
++ * DTS for D-Link DIR-868L
++ *
++ * Copyright (C) 2015 Rafał Miłecki <zajec5@gmail.com>
++ *
++ * Permission to use, copy, modify, and/or distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
++ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++ * AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
++ * INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++ * LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE
++ * OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++ * PERFORMANCE OF THIS SOFTWARE.
++ */
++
++/dts-v1/;
++
++#include "bcm4708.dtsi"
++#include "bcm5301x-nand-cs0-bch8.dtsi"
++
++/ {
++	compatible = "dlink,dir-868l", "brcm,bcm4708";
++	model = "D-Link DIR-868L (BCM4708)";
++
++	chosen {
++		bootargs = "console=ttyS0,115200";
++	};
++
++	memory {
++		reg = <0x00000000 0x08000000
++		       0x88000000 0x08000000>;
++	};
++
++	nand: nand@18028000 {
++		nandcs@0 {
++			firmware@0x0 {
++				label = "firmware";
++				reg = <0x00000000 0x02000000>;
++			};
++		};
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		power-amber {
++			label = "bcm53xx:amber:power";
++			gpios = <&chipcommon 0 GPIO_ACTIVE_LOW>;
++		};
++
++		wan-amber {
++			label = "bcm53xx:amber:wan";
++			gpios = <&chipcommon 1 GPIO_ACTIVE_LOW>;
++		};
++
++		power-green {
++			label = "bcm53xx:green:power";
++			gpios = <&chipcommon 2 GPIO_ACTIVE_LOW>;
++		};
++
++		wan-green {
++			label = "bcm53xx:green:wan";
++			gpios = <&chipcommon 3 GPIO_ACTIVE_LOW>;
++		};
++	};
++
++	gpio-keys {
++		compatible = "gpio-keys";
++		#address-cells = <1>;
++		#size-cells = <0>;
++
++		wps {
++			label = "WPS";
++			linux,code = <KEY_WPS_BUTTON>;
++			gpios = <&chipcommon 7 GPIO_ACTIVE_LOW>;
++		};
++
++		restart {
++			label = "Reset";
++			linux,code = <KEY_RESTART>;
++			gpios = <&chipcommon 11 GPIO_ACTIVE_LOW>;
++		};
++	};
++};
++
++&usb3 {
++	vcc-gpio = <&chipcommon 10 GPIO_ACTIVE_HIGH>;
++};
++
++&spi_nor {
++	status = "okay";
++};
++
++&mdio {
++	status = "okay";
++};
++
+--- /arch/arm/boot/dts/Makefile	2017-08-27 07:41:02.035103421 +0800
++++ /arch/arm/boot/dts/Makefile	2017-08-27 07:41:47.871646346 +0800
+@@ -65,6 +65,7 @@
+ 	bcm4708-asus-rt-ac56u.dtb \
+ 	bcm4708-asus-rt-ac68u.dtb \
+ 	bcm4708-buffalo-wzr-1750dhp.dtb \
++	bcm4708-dlink-dir-868l.dtb \
+ 	bcm4708-linksys-ea6300-v1.dtb \
+ 	bcm4708-luxul-xap-1510.dtb \
+ 	bcm4708-luxul-xwc-1000.dtb \
+
