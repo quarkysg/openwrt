@@ -462,7 +462,6 @@ struct ar8xxx_priv {
 	bool mirror_tx;
 	int source_port;
 	int monitor_port;
-
 	u8 port_vlan_prio[AR8X16_MAX_PORTS];
 };
 

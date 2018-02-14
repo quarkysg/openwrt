@@ -164,6 +164,7 @@
 #define   AR8327_FRAME_ACK_CTRL_S(_i)		(((_i) % 4) * 8)
 
 #define AR8327_REG_PORT_VLAN0(_i)		(0x420 + (_i) * 0x8)
+#define   AR8327_PORT_VLAN0_DEF_PRI_MASK	BITS(0, 3)
 #define   AR8327_PORT_VLAN0_DEF_SVID		BITS(0, 12)
 #define   AR8327_PORT_VLAN0_DEF_SVID_S		0
 #define   AR8327_PORT_VLAN0_DEF_SPRI		BITS(13, 3)
