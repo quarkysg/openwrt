@@ -1,5 +1,5 @@
 diff --git a/drivers/net/wireless/ath/ath10k/core.c b/drivers/net/wireless/ath/ath10k/core.c
-index f3ec13b80b20..4a0453c0e02b 100644
+index f3ec13b80b20..5ecda9242d33 100644
 --- a/drivers/net/wireless/ath/ath10k/core.c
 +++ b/drivers/net/wireless/ath/ath10k/core.c
 @@ -21,6 +21,10 @@
@@ -8,8 +8,8 @@ index f3ec13b80b20..4a0453c0e02b 100644
  #include <asm/byteorder.h>
 +#include <linux/leds.h>
 +#include <linux/platform_device.h>
++#include <linux/version.h>
 +
-+#ifdef CONFIG_GPIOLIB
  
  #include "core.h"
  #include "mac.h"
@@ -58,14 +58,16 @@ index f3ec13b80b20..4a0453c0e02b 100644
  		.patch_load_addr = QCA9888_HW_2_0_PATCH_LOAD_ADDR,
  		.uart_pin = 7,
  		.cc_wraparound_type = ATH10K_HW_CC_WRAP_SHIFTED_EACH,
-@@ -2132,12 +2148,146 @@ static int ath10k_core_reset_rx_filter(struct ath10k *ar)
+@@ -2132,12 +2148,148 @@ static int ath10k_core_reset_rx_filter(struct ath10k *ar)
  	return 0;
  }
  
++#ifdef CONFIG_GPIOLIB
++
 +static int ath10k_gpio_pin_cfg_input(struct gpio_chip *chip, unsigned offset)
 +{
 +	struct ath10k_gpiocontrol *gpio = container_of(chip, struct ath10k_gpiocontrol, gchip);
-+	ath10k_wmi_gpio_config(gpio->ar, offset, 1, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); // configure to input
++	ath10k_wmi_gpio_config(gpio->ar, offset, 1, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); /* configure to input */
 +	gpio->gpio_state_dir = 1;
 +	return 0;
 +}
@@ -76,7 +78,7 @@ index f3ec13b80b20..4a0453c0e02b 100644
 +{
 +	struct ath10k_gpiocontrol *gpio = container_of(chip, struct ath10k_gpiocontrol, gchip);
 +
-+	ath10k_wmi_gpio_config(gpio->ar, offset, 0, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); // configure to output
++	ath10k_wmi_gpio_config(gpio->ar, offset, 0, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); /* configure to output */
 +	ath10k_wmi_gpio_output(gpio->ar, offset, value);
 +	gpio->gpio_state_dir = 0;
 +	gpio->gpio_state_pin = value;
@@ -115,7 +117,7 @@ index f3ec13b80b20..4a0453c0e02b 100644
 +	struct ath10k_gpiocontrol *gpio;
 +	gpio = kzalloc(sizeof(struct ath10k_gpiocontrol), GFP_KERNEL);
 +	if (!gpio) {
-+		return -1;
++		return -ENOMEM;
 +	}
 + 
 +	snprintf(gpio->label, sizeof(gpio->label), "ath10k-%s",
@@ -206,7 +208,7 @@ index f3ec13b80b20..4a0453c0e02b 100644
  	lockdep_assert_held(&ar->conf_mutex);
  
  	clear_bit(ATH10K_FLAG_CRASH_FLUSH, &ar->dev_flags);
-@@ -2372,8 +2522,32 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
+@@ -2372,8 +2524,32 @@ int ath10k_core_start(struct ath10k *ar, enum ath10k_firmware_mode mode,
  	if (status)
  		goto err_hif_stop;
  
@@ -214,7 +216,7 @@ index f3ec13b80b20..4a0453c0e02b 100644
  
 +#ifdef CONFIG_GPIOLIB
 +	/* LED Code */
-+	if (ar->hw_params.led_pin) { // only configure if non zero
++	if (ar->hw_params.led_pin) { /* only attach if non zero since some chipsets are unsupported yet */
 +		if (!ar->gpio_attached) {
 +			status = ath10k_register_gpio_chip(ar);
 +			if (status) {
@@ -230,17 +232,17 @@ index f3ec13b80b20..4a0453c0e02b 100644
 +			ath10k_add_led(ar, &ar->gpio->wifi_led);
 +#endif
 +		}
-+		ath10k_wmi_gpio_config(ar, ar->hw_params.led_pin, 0, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); // configure to output
++		ath10k_wmi_gpio_config(ar, ar->hw_params.led_pin, 0, WMI_GPIO_PULL_NONE, WMI_GPIO_INTTYPE_DISABLE); /* configure to output */
 +		ath10k_wmi_gpio_output(ar, ar->hw_params.led_pin, 1);
 +	}
-+#endif
 +err_no_led:;
++#endif
 +	
 +	return 0;
  err_hif_stop:
  	ath10k_hif_stop(ar);
  err_htt_rx_detach:
-@@ -2673,6 +2847,9 @@ void ath10k_core_unregister(struct ath10k *ar)
+@@ -2673,6 +2849,9 @@ void ath10k_core_unregister(struct ath10k *ar)
  	ath10k_core_free_board_files(ar);
  
  	ath10k_debug_unregister(ar);
@@ -251,7 +253,7 @@ index f3ec13b80b20..4a0453c0e02b 100644
  EXPORT_SYMBOL(ath10k_core_unregister);
  
 diff --git a/drivers/net/wireless/ath/ath10k/core.h b/drivers/net/wireless/ath/ath10k/core.h
-index c624b96f8b84..7baa29e87c00 100644
+index c624b96f8b84..1340904582b7 100644
 --- a/drivers/net/wireless/ath/ath10k/core.h
 +++ b/drivers/net/wireless/ath/ath10k/core.h
 @@ -25,6 +25,8 @@
@@ -263,16 +265,18 @@ index c624b96f8b84..7baa29e87c00 100644
  
  #include "htt.h"
  #include "htc.h"
-@@ -812,6 +814,19 @@ struct ath10k_per_peer_tx_stats {
+@@ -812,6 +814,21 @@ struct ath10k_per_peer_tx_stats {
  	u32	reserved2;
  };
  
 +struct ath10k_gpiocontrol {
 +	struct ath10k *ar;
 +	u32 gpio_set_num, gpio_num, gpio_input, gpio_pull_type, gpio_intr_mode, gpio_set; /* since we have no gpio read method, these are the state variables for debugfs.  */
-+	struct gpio_led wifi_led;
++#ifdef CONFIG_GPIOLIB
 +	struct gpio_chip gchip;
++#endif
 +#ifdef CONFIG_LEDS_CLASS
++	struct gpio_led wifi_led;
 +	struct led_classdev cdev;
 +#endif
 +	char label[48];
@@ -283,15 +287,13 @@ index c624b96f8b84..7baa29e87c00 100644
  struct ath10k {
  	struct ath_common ath_common;
  	struct ieee80211_hw *hw;
-@@ -840,7 +855,10 @@ struct ath10k {
+@@ -840,7 +857,8 @@ struct ath10k {
  	u32 low_5ghz_chan;
  	u32 high_5ghz_chan;
  	bool ani_enabled;
 -
-+#ifdef CONFIG_GPIOLIB
 +	struct ath10k_gpiocontrol *gpio;
 +	int gpio_attached;
-+#endif
  	bool p2p;
  
  	struct {
@@ -454,8 +456,8 @@ index 1b9c092d210f..4ed3540669ec 100644
  {
  	u32 hi_addr;
 @@ -2259,6 +2399,12 @@ int ath10k_debug_register(struct ath10k *ar)
- 	debugfs_create_file("fw_dbglog", 0600, ar->debug.debugfs_phy, ar,
- 			    &fops_fw_dbglog);
+	debugfs_create_file("fw_dbglog", S_IRUSR | S_IWUSR,
+			     ar->debug.debugfs_phy, ar, &fops_fw_dbglog);
  
 +	debugfs_create_file("gpio_output", 0600, ar->debug.debugfs_phy, ar,
 +			    &fops_gpio_output);
@@ -463,19 +465,19 @@ index 1b9c092d210f..4ed3540669ec 100644
 +	debugfs_create_file("gpio_config", 0600, ar->debug.debugfs_phy, ar,
 +			    &fops_gpio_config);
 +
-	debugfs_create_file("cal_data", S_IRUSR, ar->debug.debugfs_phy,
-			    ar, &fops_cal_data);
+ 	debugfs_create_file("cal_data", S_IRUSR, ar->debug.debugfs_phy,
+ 			    ar, &fops_cal_data);
  
 diff --git a/drivers/net/wireless/ath/ath10k/hw.h b/drivers/net/wireless/ath/ath10k/hw.h
-index 413b1b4321f7..b1b053abc4e9 100644
+index 413b1b4321f7..af91d0202e45 100644
 --- a/drivers/net/wireless/ath/ath10k/hw.h
 +++ b/drivers/net/wireless/ath/ath10k/hw.h
 @@ -495,6 +495,8 @@ struct ath10k_hw_params {
  	const char *name;
  	u32 patch_load_addr;
  	int uart_pin;
-+	int led_pin; // 1 for peregrine, 17 for beeliner
-+	int gpio_count; // 24 for peregrine, 35 for beeliner
++	int led_pin; /* 1 for peregrine, 17 for beeliner */
++	int gpio_count; /* 24 for peregrine, 35 for beeliner */
  	u32 otp_exe_param;
  
  	/* Type of hw cycle counter wraparound logic, for more info
