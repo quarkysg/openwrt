@@ -207,11 +207,13 @@ QCA9984_BOARD_REV:=719c0127e52bd70559e71b85ab0331790e1bf66c
 QCA9984_BOARD_FILE:=board-2.bin
 QCA9984_BOARD_FILE_DL:=$(QCA9984_BOARD_FILE).$(QCA9984_BOARD_REV)
 QCA9984_FIRMWARE_REV:=d43cb1188154037506e94abf3aa456cc934c6861
-QCA9984_FIRMWARE_FILE:=firmware-5.bin_10.4-3.4-00072
+#QCA9984_FIRMWARE_FILE:=firmware-5.bin_10.4-3.4-00072
+QCA9984_FIRMWARE_FILE:=firmware-5.bin_10.4-3.5.3-00053
 QCA9984_FIRMWARE_FILE_DL:=$(QCA9984_FIRMWARE_FILE).$(QCA9984_FIRMWARE_REV)
 
 define Download/ath10k-qca9984-board
-  URL:=https://source.codeaurora.org/quic/qsdk/oss/firmware/ath10k-firmware/plain/ath10k/QCA9984/hw1.0/
+#  URL:=https://source.codeaurora.org/quic/qsdk/oss/firmware/ath10k-firmware/plain/ath10k/QCA9984/hw1.0/
+  URL:=https://github.com/kvalo/ath10k-firmware/raw/master/QCA9984/hw1.0/
   URL_FILE:=$(QCA9984_BOARD_FILE)?id=$(QCA9984_BOARD_REV)
   FILE:=$(QCA9984_BOARD_FILE_DL)
   HASH:=e968b214fd76d5b7859f71841ce40fbd5f47336c3ccbaf95e23f902f5e569aef
@@ -219,10 +221,12 @@ endef
 $(eval $(call Download,ath10k-qca9984-board))
 
 define Download/ath10k-qca9984-firmware
-  URL:=https://source.codeaurora.org/quic/qsdk/oss/firmware/ath10k-firmware/plain/ath10k/QCA9984/hw1.0/
+#  URL:=https://source.codeaurora.org/quic/qsdk/oss/firmware/ath10k-firmware/plain/ath10k/QCA9984/hw1.0/
+  URL=https://github.com/kvalo/ath10k-firmware/raw/master/QCA9984/hw1.0/3.5.3/
   URL_FILE:=$(QCA9984_FIRMWARE_FILE)?id=$(QCA9984_FIRMWARE_REV)
   FILE:=$(QCA9984_FIRMWARE_FILE_DL)
-  HASH:=28d5834e8c4ca8fcef9ea033cd8b9b0f9ee84ecf30dbde84c9c64bf8dd9912bc
+#  HASH:=28d5834e8c4ca8fcef9ea033cd8b9b0f9ee84ecf30dbde84c9c64bf8dd9912bc
+  HASH:=8d6e3c35bbb17ddaaf89f58b4418aab0a05f56dc7692ffbbabd3a4d78c948c8f
 endef
 $(eval $(call Download,ath10k-qca9984-firmware))
 
