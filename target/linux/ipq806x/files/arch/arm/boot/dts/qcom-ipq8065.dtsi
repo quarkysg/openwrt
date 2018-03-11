@@ -57,6 +57,11 @@
 			 < 384000000 775000 >;
 	};
 
+	nss-common {
+		reg = <0x03000000 0x00001000>;
+		reg-names = "nss_fpb_base";
+	};
+
 	soc: soc {
 
 		rpm@108000 {
@@ -72,6 +77,32 @@
 					regulator-min-microvolt = <775000>;
 					regulator-max-microvolt = <1275000>;
 				};
+			};
+
+			apps_fabric_clk: apps-fabric-clk {
+				compatible = "qcom,rpm-clk";
+				reg = <QCOM_RPM_APPS_FABRIC_CLK>;
+				qcom,rpm-clk-name = "apps-fabric";
+				qcom,rpm-clk-freq = <533000000>;
+				qcom,rpm-clk-active-only;
+			};
+
+			nss_fabric0_clk: nss-fab0-clk {
+				compatible = "qcom,rpm-clk";
+				reg = <QCOM_RPM_NSS_FABRIC_0_CLK>;
+
+				qcom,rpm-clk-name = "nss-fab0-clk";
+				qcom,rpm-clk-freq = <533000000>;
+				qcom,rpm-clk-active-only;
+			};
+
+			nss_fabric1_clk: nss-fab1-clk {
+				compatible = "qcom,rpm-clk";
+				reg = <QCOM_RPM_NSS_FABRIC_1_CLK>;
+
+				qcom,rpm-clk-name = "nss-fab1-clk";
+				qcom,rpm-clk-freq = <266000000>;
+				qcom,rpm-clk-active-only;
 			};
 		};
 
