@@ -425,8 +425,8 @@
 
 		nss0: nss@40000000 {
 			compatible = "qcom,nss0";
-			interrupts = <0 213 0x4>;
-			reg = <0x36000000 0x1000 0x39000000 0x20000>;
+			interrupts = <GIC_SPI 213 IRQ_TYPE_LEVEL_HIGH>; 
+			reg = <0x36000000 0x1000 0x39000000 0x10000>;
 			reg-names = "nphys", "vphys";
 			clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK_SRC>, <&gcc NSSTCM_CLK>, <&gcc QCOM_RPM_NSS_FABRIC_0_CLK>, <&gcc QCOM_RPM_NSS_FABRIC_1_CLK>;
 			clock-names = "nss_core_clk", "nss_tcm_src", "nss_tcm_clk", "nss-fab0-clk", "nss-fab1-clk";
@@ -445,7 +445,7 @@
 			qcom,l2switch_enabled = <1>;
 			qcom,crypto_enabled = <0>;
 			qcom,ipsec_enabled = <0>;
-			qcom,wlan_enabled = <0>;
+			qcom,wlan_enabled = <1>;
 			qcom,tun6rd_enabled = <1>;
 			qcom,tunipip6_enabled = <1>;
 			qcom,shaping_enabled = <1>;
@@ -453,6 +453,38 @@
 			qcom,gmac1_enabled = <1>;
 			qcom,gmac2_enabled = <1>;
 			qcom,gmac3_enabled = <1>;
+		};
+
+		nss1: nss@40800000 {
+			compatible = "qcom,nss1";
+			interrupts = <GIC_SPI 214 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x36400000 0x1000 0x39010000 0x10000>;
+			reg-names = "nphys", "vphys";
+			clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK_SRC>, <&gcc NSSTCM_CLK>;
+			clock-names = "nss_core_clk", "nss_tcm_src", "nss_tcm_clk";
+			resets = <&gcc UBI32_CORE2_CLKRST_CLAMP_RESET>,
+				 <&gcc UBI32_CORE2_CLAMP_RESET>,
+				 <&gcc UBI32_CORE2_AHB_RESET>,
+				 <&gcc UBI32_CORE2_AXI_RESET>;
+			reset-names = "clkrst_clamp", "clamp", "ahb", "axi";
+			qcom,id = <1>;
+			qcom,num_irq = <1>;
+			qcom,rst_addr = <0x40800000>;
+			qcom,load_addr = <0x40800000>;
+			qcom,turbo_frequency = <1>;
+			qcom,ipv4_enabled = <0>;
+			qcom,ipv6_enabled = <0>;
+			qcom,l2switch_enabled = <0>;
+			qcom,crypto_enabled = <1>;
+			qcom,ipsec_enabled = <1>;
+			qcom,wlan_enabled = <0>;
+			qcom,tun6rd_enabled = <0>;
+			qcom,tunipip6_enabled = <0>;
+			qcom,shaping_enabled = <0>;
+			qcom,gmac0_enabled = <0>;
+			qcom,gmac1_enabled = <0>;
+			qcom,gmac2_enabled = <0>;
+			qcom,gmac3_enabled = <0>;
 		};
 
 		gmac1: ethernet@37200000 {
