@@ -22,12 +22,15 @@ define KernelPackage/qca-nss-drv/install
 	$(INSTALL_DIR) $(1)/etc/sysctl.d
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/firmware
 	$(INSTALL_DIR) $(1)/etc/config
+	$(INSTALL_DIR) $(1)/lib/firmware
 
 	$(INSTALL_BIN) ./files/qca-nss-drv.debug $(1)/lib/debug/qca-nss-drv
 	$(INSTALL_BIN) ./files/qca-nss-drv.init $(1)/etc/init.d/qca-nss-drv
 	$(INSTALL_BIN) ./files/qca-nss-drv.sysctl $(1)/etc/sysctl.d/qca-nss-drv.conf
 	$(INSTALL_BIN) ./files/qca-nss-drv.hotplug $(1)/etc/hotplug.d/firmware/10-qca-nss-fw
 	$(INSTALL_BIN) ./files/qca-nss-drv.conf $(1)/etc/config/nss
+	$(INSTALL_BIN) ./files/nss-firmware/qca-nss0-retail.bin $(1)/lib/firmware/qca-nss0.bin
+	$(INSTALL_BIN) ./files/nss-firmware/qca-nss1-retail.bin $(1)/lib/firmware/qca-nss1.bin
 
 endef
 
