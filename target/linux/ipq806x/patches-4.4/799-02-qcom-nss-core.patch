@@ -9,7 +9,7 @@
  #endif
 --- a/drivers/clk/qcom/gcc-ipq806x.c	2018-03-11 13:28:39.390001000 +0800
 +++ b/drivers/clk/qcom/gcc-ipq806x.c	2018-03-11 13:57:23.770001000 +0800
-@@ -2801,6 +2801,92 @@
+@@ -2801,6 +2801,85 @@
  	},
  };
  
@@ -38,14 +38,11 @@
 +			&ubi32_core2_src_clk.clkr.hw, rate, parent_rate, index);
 +	return ret;
 +}
-+static long nss_core_clk_determine_rate(struct clk_hw *hw, unsigned long rate,
-+				 unsigned long *p_rate, struct clk **p)
++static int nss_core_clk_determine_rate(struct clk_hw *hw,
++					 struct clk_rate_request *req)
 +{
-+/*
 +	return clk_dyn_rcg_ops.determine_rate(&ubi32_core1_src_clk.clkr.hw,
-+						 rate, p_rate, p);
-+*/
-+	return 0;
++						req);
 +}
 +
 +static unsigned long
@@ -69,13 +66,9 @@
 +	return clk_dyn_rcg_ops.set_parent(&ubi32_core2_src_clk.clkr.hw, i);
 +}
 +
-+static struct clk *nss_core_clk_get_safe_parent(struct clk_hw *hw)
++static struct clk_hw **nss_core_clk_get_safe_parent(struct clk_hw *hw)
 +{
-+/*
-+	return clk_get_parent_by_index(hw->clk,
-+			ubi32_core2_src_clk.s[0].parent_map[P_PLL8]);
-+*/
-+	return NULL;
++	return clk_hw_get_parent_by_index(hw, P_PLL8);
 +}
 +
 +static const struct clk_ops clk_ops_nss_core = {
