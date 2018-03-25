@@ -1,11 +1,14 @@
 --- a/drivers/clk/qcom/gcc-ipq806x.c	2018-03-21 20:33:18.581000000 +0800
 +++ b/drivers/clk/qcom/gcc-ipq806x.c	2018-03-21 22:05:44.838216822 +0800
-@@ -2801,6 +2801,79 @@
+@@ -2801,6 +2801,81 @@
  	},
  };
  
 +static const struct freq_tbl clk_tbl_ce5[] = {
 +	{  48000000, P_PLL8, 8,   1,   1 },
++	{ 150000000, P_PLL8, 8,  25,   8 },
++	{ 160000000, P_PLL8, 8,  20,   6 },
++	{ 213200000, P_PLL8, 1,   5,   9 },
 +	{ }
 +};
 +
@@ -36,7 +39,6 @@
 +			.parent_names = gcc_pxo_pll8,
 +			.num_parents = 2,
 +			.ops = &clk_rcg_ops,
-+			.flags = CLK_SET_PARENT_GATE,
 +		},
 +	},
 +};
@@ -59,14 +61,14 @@
 +	},
 +};
 +
-+static struct clk_branch ce5_p_clk = {
++static struct clk_branch ce5_h_clk = {
 +	.halt_reg = 0x3c20,
 +	.halt_bit = 11,
 +	.clkr = {
 +		.enable_reg = 0x3c6c,
 +		.enable_mask = BIT(4),
 +		.hw.init = &(struct clk_init_data) {
-+			.name = "ce5_p_clk",
++			.name = "ce5_h_clk",
 +			.parent_names = (const char *[]) {
 +				"ce5_src_clk",
 +			},
@@ -85,7 +87,7 @@
  	[PLL10] = &hfpll1.clkr,
  	[PLL12] = &hfpll_l2.clkr,
 +	[CE5_SRC] = &ce5_src_clk.clkr,
-+	[CE5_H_CLK] = &ce5_p_clk.clkr,
++	[CE5_H_CLK] = &ce5_h_clk.clkr,
 +	[CE5_CORE_CLK] = &ce5_core_clk.clkr,
  };
  

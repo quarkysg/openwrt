@@ -563,10 +563,10 @@
 
 		crypto1: crypto@38000000 {
 			compatible = "qcom,nss-crypto";
-			reg = <0x38000000 0x20000>, <0x38004000 0x22000>;
+			reg = <0x38000000 0x4000>, <0x38004000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_SRC>, <&gcc CE5_H_CLK>;
-			clock-names = "ce5_core_clk", "ce5_src_clk", "ce5_p_clk";
+			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_H_CLK>;
+			clock-names = "ce5_core_clk", "ce5_p_clk";
 			resets = <&gcc CRYPTO_ENG1_RESET>, <&gcc CRYPTO_AHB_RESET>;
 			reset-names = "rst_eng", "rst_ahb";
 			qcom,id = <0>;
@@ -575,10 +575,8 @@
 
 		crypto2: crypto@38400000 {
 			compatible = "qcom,nss-crypto";
-			reg = <0x38400000 0x20000>, <0x38404000 0x22000>;
+			reg = <0x38400000 0x4000>, <0x38404000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_SRC>, <&gcc CE5_H_CLK>;
-			clock-names = "ce5_core_clk", "ce5_src_clk", "ce5_p_clk";
 			resets = <&gcc CRYPTO_ENG2_RESET>;
 			reset-names = "rst_eng";
 			qcom,id = <1>;
@@ -587,10 +585,8 @@
 
 		crypto3: crypto@38800000 {
 			compatible = "qcom,nss-crypto";
-			reg = <0x38800000 0x20000>, <0x38804000 0x22000>;
+			reg = <0x38800000 0x4000>, <0x38804000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_SRC>, <&gcc CE5_H_CLK>;
-			clock-names = "ce5_core_clk", "ce5_src_clk", "ce5_p_clk";
 			resets = <&gcc CRYPTO_ENG3_RESET>;
 			reset-names = "rst_eng";
 			qcom,id = <2>;
@@ -599,13 +595,11 @@
 
 		crypto4: crypto@38c00000 {
 			compatible = "qcom,nss-crypto";
-			reg = <0x38c00000 0x20000>, <0x38c04000 0x22000>;
+			reg = <0x38c00000 0x4000>, <0x38c04000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_SRC>, <&gcc CE5_H_CLK>;
-			clock-names = "ce5_core_clk", "ce5_src_clk", "ce5_p_clk";
 			resets = <&gcc CRYPTO_ENG4_RESET>;
 			reset-names = "rst_eng";
-			qcom,id = <2>;
+			qcom,id = <3>;
 			qcom,ee = <0>;
 		};
 	};
