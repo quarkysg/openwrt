@@ -428,7 +428,7 @@
 			interrupts = <GIC_SPI 213 IRQ_TYPE_LEVEL_HIGH>, <GIC_SPI 232 IRQ_TYPE_LEVEL_HIGH>; 
 			reg = <0x36000000 0x1000 0x39000000 0x10000>;
 			reg-names = "nphys", "vphys";
-			clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK_SRC>, <&gcc NSSTCM_CLK>, <&gcc QCOM_RPM_NSS_FABRIC_0_CLK>, <&gcc QCOM_RPM_NSS_FABRIC_1_CLK>;
+			clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK_SRC>, <&gcc NSSTCM_CLK>, <&rpmcc RPM_NSS_FABRIC_0_CLK>, <&rpmcc RPM_NSS_FABRIC_1_CLK>;
 			clock-names = "nss_core_clk", "nss_tcm_src", "nss_tcm_clk", "nss-fab0-clk", "nss-fab1-clk";
 			resets = <&gcc UBI32_CORE1_CLKRST_CLAMP_RESET>,
 				 <&gcc UBI32_CORE1_CLAMP_RESET>,
