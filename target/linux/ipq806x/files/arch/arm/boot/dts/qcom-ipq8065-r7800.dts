@@ -453,10 +453,10 @@
 			qcom,tunipip6_enabled = <1>;
 			qcom,gre_redir_enabled = <1>;
 			qcom,shaping_enabled = <1>;
-			qcom,gmac0_enabled = <0>;
+			qcom,gmac0_enabled = <1>;
 			qcom,gmac1_enabled = <1>;
 			qcom,gmac2_enabled = <1>;
-			qcom,gmac3_enabled = <0>;
+			qcom,gmac3_enabled = <1>;
 			qcom,wifioffload_enabled = <1>;
 		};
 
@@ -577,8 +577,10 @@
 			compatible = "qcom,nss-crypto";
 			reg = <0x38400000 0x4000>, <0x38404000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			resets = <&gcc CRYPTO_ENG2_RESET>;
-			reset-names = "rst_eng";
+			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_H_CLK>;
+			clock-names = "ce5_core_clk", "ce5_p_clk";
+			resets = <&gcc CRYPTO_ENG2_RESET>, <&gcc CRYPTO_AHB_RESET>;
+			reset-names = "rst_eng", "rst_ahb";
 			qcom,id = <1>;
 			qcom,ee = <0>;
 		};
@@ -587,8 +589,10 @@
 			compatible = "qcom,nss-crypto";
 			reg = <0x38800000 0x4000>, <0x38804000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			resets = <&gcc CRYPTO_ENG3_RESET>;
-			reset-names = "rst_eng";
+			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_H_CLK>;
+			clock-names = "ce5_core_clk", "ce5_p_clk";
+			resets = <&gcc CRYPTO_ENG3_RESET>, <&gcc CRYPTO_AHB_RESET>;
+			reset-names = "rst_eng", "rst_ahb";
 			qcom,id = <2>;
 			qcom,ee = <0>;
 		};
@@ -597,8 +601,10 @@
 			compatible = "qcom,nss-crypto";
 			reg = <0x38c00000 0x4000>, <0x38c04000 0x22000>;
 			reg-names = "crypto-base", "crypto-bam-base";
-			resets = <&gcc CRYPTO_ENG4_RESET>;
-			reset-names = "rst_eng";
+			clocks = <&gcc CE5_CORE_CLK>, <&gcc CE5_H_CLK>;
+			clock-names = "ce5_core_clk", "ce5_p_clk";
+			resets = <&gcc CRYPTO_ENG4_RESET>, <&gcc CRYPTO_AHB_RESET>;
+			reset-names = "rst_eng", "rst_ahb";
 			qcom,id = <3>;
 			qcom,ee = <0>;
 		};
