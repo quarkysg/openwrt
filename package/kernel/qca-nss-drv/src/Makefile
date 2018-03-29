@@ -54,8 +54,8 @@ qca-nss-drv-objs := \
 qca-nss-drv-objs += \
 			nss_tx_rx_virt_if.o
 
-ccflags-y += -I$(obj)/nss_hal/include -I$(obj)/exports -DNSS_DEBUG_LEVEL=2 -DNSS_PKT_STATS_ENABLED=1
-ccflags-y += -DNSS_PM_DEBUG_LEVEL=2 -DNSS_PPP_SUPPORT=1 -DNSS_SKB_RECYCLE_SUPPORT=1
+ccflags-y += -I$(obj)/nss_hal/include -I$(obj)/exports -DNSS_DEBUG_LEVEL=3 -DNSS_PKT_STATS_ENABLED=1
+ccflags-y += -DNSS_PM_DEBUG_LEVEL=3 -DNSS_PPP_SUPPORT=1 -DNSS_SKB_RECYCLE_SUPPORT=1
 
 ifneq ($(findstring 3.4, $(KERNELVERSION)),)
 NSS_CCFLAGS = -DNSS_DT_SUPPORT=0 -DNSS_FW_DBG_SUPPORT=1 -DNSS_PM_SUPPORT=1 -DNSS_EMPTY_BUFFER_SIZE=1984
