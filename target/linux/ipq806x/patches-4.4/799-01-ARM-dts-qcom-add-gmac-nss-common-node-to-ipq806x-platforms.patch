@@ -1,10 +1,11 @@
 --- a/arch/arm/boot/dts/qcom-ipq8064.dtsi	2018-03-03 12:49:12.169415494 +0800
 +++ b/arch/arm/boot/dts/qcom-ipq8064.dtsi	2018-03-03 12:50:38.329416121 +0800
-@@ -928,6 +928,11 @@
+@@ -928,6 +928,12 @@
  			reg = <0x1bb00000 0x000001FF>;
  		};
  
 +		nss-gmac-common {
++			compatible = "qcom,nss-gmac-common";
 +			reg = <0x03000000 0x0000FFFF 0x1bb00000 0x0000FFFF 0x00900000 0x00004000>;
 +			reg-names = "nss_reg_base" , "qsgmii_reg_base", "clk_ctl_base";
 +		};
