@@ -370,8 +370,8 @@
 				read-only;
 			};
 
-			firmware@1480000 {
-				label = "firmware";
+			nandfw@1480000 {
+				label = "nandfw";
 				reg = <0x1480000 0x6480000>;
 			};
 		};
