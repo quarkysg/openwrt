@@ -81,6 +81,15 @@
 		fab_freq_nominal = <400000000>;
 	};
 
+	firmware {
+		scm {
+			compatible = "qcom,scm-ipq806x";
+		};
+		qfprom {
+			compatible = "qcom,qfprom-sec";
+		};
+	};
+
 	soc: soc {
 
 		rpm@108000 {
