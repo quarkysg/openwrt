@@ -1,0 +1,498 @@
+--- a/arch/arm/boot/dts/qcom-ipq8064.dtsi	2018-04-14 15:21:32.665620959 +0800
++++ b/arch/arm/boot/dts/qcom-ipq8064.dtsi	2018-04-14 15:22:58.449620959 +0800
+@@ -35,6 +35,7 @@
+ 			cooling-max-state = <10>;
+ 			#cooling-cells = <2>;
+ 			cpu-idle-states = <&CPU_SPC>;
++			cpu_fab_threshold = <1000000000>;
+ 		};
+ 
+ 		cpu1: cpu@1 {
+@@ -53,12 +54,20 @@
+ 			cooling-max-state = <10>;
+ 			#cooling-cells = <2>;
+ 			cpu-idle-states = <&CPU_SPC>;
++			cpu_fab_threshold = <1000000000>;
+ 		};
+ 
+ 		L2: l2-cache {
+ 			compatible = "cache";
+ 			cache-level = <2>;
+ 			qcom,saw = <&saw_l2>;
++			cache-points-kHz = <
++				/* kHz    uV    CPU kHz */
++				1200000 1150000 1200000
++				1000000 1100000  600000
++				 384000 1100000  384000
++			>;
++			vdd_dig-supply = <&smb208_s1a>;
+ 		};
+ 
+ 		qcom,l2 {
+--- a/drivers/cpufreq/cpufreq.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/cpufreq/cpufreq.c	2018-03-31 11:12:37.529203000 +0800
+@@ -2451,7 +2451,6 @@
+ 	if (!(cpufreq_driver->flags & CPUFREQ_STICKY) &&
+ 	    list_empty(&cpufreq_policy_list)) {
+ 		/* if all ->init() calls failed, unregister */
+-		ret = -ENODEV;
+ 		pr_debug("%s: No CPU initialized for driver %s\n", __func__,
+ 			 driver_data->name);
+ 		goto err_if_unreg;
+--- a/drivers/cpufreq/cpufreq_conservative.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/cpufreq/cpufreq_conservative.c	2018-03-31 11:12:37.529203000 +0800
+@@ -212,8 +212,8 @@
+ 	int ret;
+ 	ret = sscanf(buf, "%u", &input);
+ 
+-	/* cannot be lower than 1 otherwise freq will not fall */
+-	if (ret != 1 || input < 1 || input > 100 ||
++	/* cannot be lower than 11 otherwise freq will not fall */
++	if (ret != 1 || input < 11 || input > 100 ||
+ 			input >= cs_tuners->up_threshold)
+ 		return -EINVAL;
+ 
+--- a/drivers/cpufreq/cpufreq-dt.c	2018-04-14 15:19:45.925620959 +0800
++++ b/drivers/cpufreq/cpufreq-dt.c	2018-03-31 11:12:37.525203000 +0800
+@@ -34,9 +34,7 @@
+ 	struct regulator *cpu_reg;
+ 	struct thermal_cooling_device *cdev;
+ 	unsigned int voltage_tolerance; /* in percentage */
+-	struct notifier_block opp_nb;
+-	struct mutex lock;
+-	unsigned long opp_freq;
++	bool enable_cpu_reg;
+ };
+ 
+ static struct freq_attr *cpufreq_dt_attr[] = {
+@@ -45,56 +43,17 @@
+ 	NULL,
+ };
+ 
+-static int opp_notifier(struct notifier_block *nb, unsigned long event,
+-			void *data)
+-{
+-	struct dev_pm_opp *opp = data;
+-	struct private_data *priv = container_of(nb, struct private_data,
+-						 opp_nb);
+-	struct device *cpu_dev = priv->cpu_dev;
+-	struct regulator *cpu_reg = priv->cpu_reg;
+-	unsigned long volt, tol, freq;
+-	int ret = 0;
+-
+-	switch (event) {
+-		case OPP_EVENT_ADJUST_VOLTAGE:
+-			volt = dev_pm_opp_get_voltage(opp);
+-			freq = dev_pm_opp_get_freq(opp);
+-			tol = volt * priv->voltage_tolerance / 100;
+-
+-			mutex_lock(&priv->lock);
+-			if (freq == priv->opp_freq)
+-				ret = regulator_set_voltage_tol(cpu_reg, volt,
+-								tol);
+-			mutex_unlock(&priv->lock);
+-			if (ret) {
+-				dev_err(cpu_dev,
+-					"failed to scale voltage up: %d\n",
+-					ret);
+-				return ret;
+-			}
+-			break;
+-		default:
+-			break;
+-	}
+-
+-	return 0;
+-}
+-
+ static int set_target(struct cpufreq_policy *policy, unsigned int index)
+ {
+ 	struct dev_pm_opp *opp;
+ 	struct cpufreq_frequency_table *freq_table = policy->freq_table;
+ 	struct clk *cpu_clk = policy->clk;
+-	struct clk *l2_clk = policy->l2_clk;
+ 	struct private_data *priv = policy->driver_data;
+ 	struct device *cpu_dev = priv->cpu_dev;
+ 	struct regulator *cpu_reg = priv->cpu_reg;
+ 	unsigned long volt = 0, volt_old = 0, tol = 0;
+-	unsigned int old_freq, new_freq, l2_freq;
+-	unsigned long new_l2_freq = 0;
++	unsigned int old_freq, new_freq;
+ 	long freq_Hz, freq_exact;
+-	unsigned long opp_freq = 0;
+ 	int ret;
+ 
+ 	freq_Hz = clk_round_rate(cpu_clk, freq_table[index].frequency * 1000);
+@@ -105,8 +64,8 @@
+ 	new_freq = freq_Hz / 1000;
+ 	old_freq = clk_get_rate(cpu_clk) / 1000;
+ 
+-	mutex_lock(&priv->lock);
+ 	if (!IS_ERR(cpu_reg)) {
++		unsigned long opp_freq;
+ 
+ 		rcu_read_lock();
+ 		opp = dev_pm_opp_find_freq_ceil(cpu_dev, &freq_Hz);
+@@ -114,8 +73,7 @@
+ 			rcu_read_unlock();
+ 			dev_err(cpu_dev, "failed to find OPP for %ld\n",
+ 				freq_Hz);
+-			ret = PTR_ERR(opp);
+-			goto out;
++			return PTR_ERR(opp);
+ 		}
+ 		volt = dev_pm_opp_get_voltage(opp);
+ 		opp_freq = dev_pm_opp_get_freq(opp);
+@@ -136,7 +94,7 @@
+ 		if (ret) {
+ 			dev_err(cpu_dev, "failed to scale voltage up: %d\n",
+ 				ret);
+-			goto out;
++			return ret;
+ 		}
+ 	}
+ 
+@@ -145,31 +103,7 @@
+ 		dev_err(cpu_dev, "failed to set clock rate: %d\n", ret);
+ 		if (!IS_ERR(cpu_reg) && volt_old > 0)
+ 			regulator_set_voltage_tol(cpu_reg, volt_old, tol);
+-		goto out;
+-	}
+-
+-	if (!IS_ERR(l2_clk) && policy->l2_rate[0] && policy->l2_rate[1] &&
+-	    policy->l2_rate[2]) {
+-		static unsigned long krait_l2[CONFIG_NR_CPUS] = { };
+-		int cpu, ret = 0;
+-
+-		if (freq_exact >= policy->l2_rate[2])
+-			new_l2_freq = policy->l2_rate[2];
+-		else if (freq_exact >= policy->l2_rate[1])
+-			new_l2_freq = policy->l2_rate[1];
+-		else
+-			new_l2_freq = policy->l2_rate[0];
+-
+-		krait_l2[policy->cpu] = new_l2_freq;
+-		for_each_present_cpu(cpu)
+-			new_l2_freq = max(new_l2_freq, krait_l2[cpu]);
+-
+-		l2_freq = clk_get_rate(l2_clk);
+-
+-		if (l2_freq != new_l2_freq) {
+-			/* scale l2 with the core */
+-			ret = clk_set_rate(l2_clk, new_l2_freq);
+-		}
++		return ret;
+ 	}
+ 
+ 	/* scaling down?  scale voltage after frequency */
+@@ -179,24 +113,18 @@
+ 			dev_err(cpu_dev, "failed to scale voltage down: %d\n",
+ 				ret);
+ 			clk_set_rate(cpu_clk, old_freq * 1000);
+-			goto out;
+ 		}
+ 	}
+ 
+-	priv->opp_freq = opp_freq;
+-
+-out:
+-	mutex_unlock(&priv->lock);
+ 	return ret;
+ }
+ 
+ static int allocate_resources(int cpu, struct device **cdev,
+-			      struct regulator **creg, struct clk **cclk,
+-			      struct clk **l2)
++			      struct regulator **creg, struct clk **cclk)
+ {
+ 	struct device *cpu_dev;
+ 	struct regulator *cpu_reg;
+-	struct clk *cpu_clk, *l2_clk = NULL;
++	struct clk *cpu_clk;
+ 	int ret = 0;
+ 	char *reg_cpu0 = "cpu0", *reg_cpu = "cpu", *reg;
+ 
+@@ -256,10 +184,6 @@
+ 		*cdev = cpu_dev;
+ 		*creg = cpu_reg;
+ 		*cclk = cpu_clk;
+-
+-		l2_clk = clk_get(cpu_dev, "l2");
+-		if (!IS_ERR(l2_clk))
+-			*l2 = l2_clk;
+ 	}
+ 
+ 	return ret;
+@@ -269,20 +193,17 @@
+ {
+ 	struct cpufreq_frequency_table *freq_table;
+ 	struct device_node *np;
+-	struct device_node *l2_np;
+ 	struct private_data *priv;
+ 	struct device *cpu_dev;
+ 	struct regulator *cpu_reg;
++	struct clk *cpu_clk;
+ 	struct dev_pm_opp *suspend_opp;
+-	struct clk *cpu_clk, *l2_clk;
+ 	unsigned long min_uV = ~0, max_uV = 0;
+ 	unsigned int transition_latency;
+ 	bool need_update = false;
+ 	int ret;
+-	struct srcu_notifier_head *opp_srcu_head;
+ 
+-	ret = allocate_resources(policy->cpu, &cpu_dev, &cpu_reg, &cpu_clk,
+-				 &l2_clk);
++	ret = allocate_resources(policy->cpu, &cpu_dev, &cpu_reg, &cpu_clk);
+ 	if (ret) {
+ 		pr_err("%s: Failed to allocate resources: %d\n", __func__, ret);
+ 		return ret;
+@@ -357,22 +278,6 @@
+ 		goto out_free_opp;
+ 	}
+ 
+-	mutex_init(&priv->lock);
+-
+-	rcu_read_lock();
+-	opp_srcu_head = dev_pm_opp_get_notifier(cpu_dev);
+-	if (IS_ERR(opp_srcu_head)) {
+-		ret = PTR_ERR(opp_srcu_head);
+-		rcu_read_unlock();
+-		goto out_free_priv;
+-	}
+-
+-	priv->opp_nb.notifier_call = opp_notifier;
+-	ret = srcu_notifier_chain_register(opp_srcu_head, &priv->opp_nb);
+-	rcu_read_unlock();
+-	if (ret)
+-		goto out_free_priv;
+-
+ 	of_property_read_u32(np, "voltage-tolerance", &priv->voltage_tolerance);
+ 
+ 	if (!transition_latency)
+@@ -417,12 +322,22 @@
+ 		ret = regulator_set_voltage_time(cpu_reg, min_uV, max_uV);
+ 		if (ret > 0)
+ 			transition_latency += ret * 1000;
++
++		priv->enable_cpu_reg =
++			of_property_read_bool(np, "enable-cpu-regulator");
++		if (priv->enable_cpu_reg) {
++			ret = regulator_enable(cpu_reg);
++			if (ret) {
++				pr_err("failed to enable CPU regulator: %d\n", ret);
++				goto out_free_priv;
++			}
++		}
+ 	}
+ 
+ 	ret = dev_pm_opp_init_cpufreq_table(cpu_dev, &freq_table);
+ 	if (ret) {
+ 		pr_err("failed to init cpufreq table: %d\n", ret);
+-		goto out_unregister_nb;
++		goto out_reg_disable;
+ 	}
+ 
+ 	priv->cpu_dev = cpu_dev;
+@@ -436,11 +351,6 @@
+ 	if (suspend_opp)
+ 		policy->suspend_freq = dev_pm_opp_get_freq(suspend_opp) / 1000;
+ 	rcu_read_unlock();
+-	policy->l2_clk = l2_clk;
+-
+-	l2_np = of_find_node_by_name(NULL, "qcom,l2");
+-	if (l2_np)
+-		of_property_read_u32_array(l2_np, "qcom,l2-rates", policy->l2_rate, 3);
+ 
+ 	ret = cpufreq_table_validate_and_show(policy, freq_table);
+ 	if (ret) {
+@@ -466,8 +376,9 @@
+ 
+ out_free_cpufreq_table:
+ 	dev_pm_opp_free_cpufreq_table(cpu_dev, &freq_table);
+-out_unregister_nb:
+-	srcu_notifier_chain_unregister(opp_srcu_head, &priv->opp_nb);
++out_reg_disable:
++	if (!IS_ERR(cpu_reg) && priv->enable_cpu_reg)
++		regulator_disable(cpu_reg);
+ out_free_priv:
+ 	kfree(priv);
+ out_free_opp:
+@@ -490,8 +401,11 @@
+ 	dev_pm_opp_free_cpufreq_table(priv->cpu_dev, &policy->freq_table);
+ 	dev_pm_opp_of_cpumask_remove_table(policy->related_cpus);
+ 	clk_put(policy->clk);
+-	if (!IS_ERR(priv->cpu_reg))
++	if (!IS_ERR(priv->cpu_reg)) {
++		if (priv->enable_cpu_reg)
++			regulator_disable(priv->cpu_reg);
+ 		regulator_put(priv->cpu_reg);
++	}
+ 	kfree(priv);
+ 
+ 	return 0;
+@@ -541,7 +455,7 @@
+ {
+ 	struct device *cpu_dev;
+ 	struct regulator *cpu_reg;
+-	struct clk *cpu_clk, *l2_clk;
++	struct clk *cpu_clk;
+ 	int ret;
+ 
+ 	/*
+@@ -551,7 +465,7 @@
+ 	 *
+ 	 * FIXME: Is checking this only for CPU0 sufficient ?
+ 	 */
+-	ret = allocate_resources(0, &cpu_dev, &cpu_reg, &cpu_clk, &l2_clk);
++	ret = allocate_resources(0, &cpu_dev, &cpu_reg, &cpu_clk);
+ 	if (ret)
+ 		return ret;
+ 
+--- a/drivers/cpufreq/Kconfig	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/cpufreq/Kconfig	2018-03-31 11:12:37.509203000 +0800
+@@ -190,6 +190,7 @@
+ 	depends on HAVE_CLK && OF
+ 	# if CPU_THERMAL is on and THERMAL=m, CPUFREQ_DT cannot be =y:
+ 	depends on !CPU_THERMAL || THERMAL
++	select CPUFREQ_DT_PLATDEV
+ 	select PM_OPP
+ 	help
+ 	  This adds a generic DT based cpufreq driver for frequency management.
+@@ -198,6 +199,28 @@
+ 
+ 	  If in doubt, say N.
+ 
++config CPUFREQ_DT_PLATDEV
++	bool
++	help
++	  This adds a generic DT based cpufreq platdev driver for frequency
++	  management.  This creates a 'cpufreq-dt' platform device, on the
++	  supported platforms.
++
++	  If in doubt, say N.
++
++config GENERIC_CPUFREQ_KRAIT
++	tristate "Krait cpufreq driver"
++	depends on HAVE_CLK && OF
++	# if CPU_THERMAL is on and THERMAL=m, CPU0 cannot be =y:
++	depends on !CPU_THERMAL || THERMAL
++	select PM_OPP
++	help
++	  This adds a generic cpufreq driver for CPU0 frequency management.
++	  It supports both uniprocessor (UP) and symmetric multiprocessor (SMP)
++	  systems which share clock and voltage across all CPUs.
++
++	  If in doubt, say N.
++
+ if X86
+ source "drivers/cpufreq/Kconfig.x86"
+ endif
+@@ -236,7 +259,6 @@
+ if MIPS
+ config LOONGSON2_CPUFREQ
+ 	tristate "Loongson2 CPUFreq Driver"
+-	depends on LEMOTE_MACH2F
+ 	help
+ 	  This option adds a CPUFreq driver for loongson processors which
+ 	  support software configurable cpu frequency.
+@@ -249,7 +271,6 @@
+ 
+ config LOONGSON1_CPUFREQ
+ 	tristate "Loongson1 CPUFreq Driver"
+-	depends on LOONGSON1_LS1B
+ 	help
+ 	  This option adds a CPUFreq driver for loongson1 processors which
+ 	  support software configurable cpu frequency.
+--- a/drivers/cpufreq/Kconfig.arm	2018-04-14 15:19:45.829620959 +0800
++++ b/drivers/cpufreq/Kconfig.arm	2018-03-31 11:12:37.509203000 +0800
+@@ -250,7 +250,7 @@
+ 
+ config ACPI_CPPC_CPUFREQ
+ 	tristate "CPUFreq driver based on the ACPI CPPC spec"
+-	depends on ACPI_PROCESSOR
++	depends on ACPI
+ 	select ACPI_CPPC_LIB
+ 	default n
+ 	help
+--- a/drivers/cpufreq/Makefile	2018-04-14 15:19:45.829620959 +0800
++++ b/drivers/cpufreq/Makefile	2018-03-31 11:12:37.509203000 +0800
+@@ -13,6 +13,8 @@
+ obj-$(CONFIG_CPU_FREQ_GOV_COMMON)		+= cpufreq_governor.o
+ 
+ obj-$(CONFIG_CPUFREQ_DT)		+= cpufreq-dt.o
++obj-$(CONFIG_CPUFREQ_DT_PLATDEV)	+= cpufreq-dt-platdev.o
++obj-$(CONFIG_GENERIC_CPUFREQ_KRAIT)	+= cpufreq-krait.o
+ 
+ ##################################################################################
+ # x86 drivers.
+@@ -61,7 +63,7 @@
+ obj-$(CONFIG_ARM_OMAP2PLUS_CPUFREQ)	+= omap-cpufreq.o
+ obj-$(CONFIG_ARM_PXA2xx_CPUFREQ)	+= pxa2xx-cpufreq.o
+ obj-$(CONFIG_PXA3xx)			+= pxa3xx-cpufreq.o
+-obj-$(CONFIG_ARM_QCOM_CPUFREQ)         += qcom-cpufreq.o
++obj-$(CONFIG_ARM_QCOM_CPUFREQ)		+= qcom-cpufreq.o
+ obj-$(CONFIG_ARM_S3C24XX_CPUFREQ)	+= s3c24xx-cpufreq.o
+ obj-$(CONFIG_ARM_S3C24XX_CPUFREQ_DEBUGFS) += s3c24xx-cpufreq-debugfs.o
+ obj-$(CONFIG_ARM_S3C2410_CPUFREQ)	+= s3c2410-cpufreq.o
+--- a/drivers/cpufreq/qcom-cpufreq.c	2018-04-14 15:19:45.829620959 +0800
++++ b/drivers/cpufreq/qcom-cpufreq.c	2018-03-31 11:12:37.553203000 +0800
+@@ -20,7 +20,6 @@
+ #include <linux/platform_device.h>
+ #include <linux/pm_opp.h>
+ #include <linux/slab.h>
+-#include <linux/cpufreq-dt.h>
+ 
+ static void __init get_krait_bin_format_a(int *speed, int *pvs, int *pvs_ver)
+ {
+@@ -168,15 +167,12 @@
+ 
+ static int __init qcom_cpufreq_driver_init(void)
+ {
+-	struct cpufreq_dt_platform_data pdata = { .independent_clocks = true };
+ 	struct platform_device_info devinfo = {
+-		.name = "cpufreq-dt",
+-		.data = &pdata,
+-		.size_data = sizeof(pdata),
++		.name = "cpufreq-krait",
+ 	};
+ 	struct device *cpu_dev;
+ 	struct device_node *np;
+-	int ret;
++	int ret = -ENODEV;
+ 
+ 	cpu_dev = get_cpu_device(0);
+ 	if (!cpu_dev)
+@@ -186,17 +182,15 @@
+ 	if (!np)
+ 		return -ENOENT;
+ 
+-	if (!of_device_is_compatible(np, "qcom,krait")) {
++	if (of_device_is_compatible(np, "qcom,krait")) {
+ 		of_node_put(np);
+-		return -ENODEV;
++		ret = qcom_cpufreq_populate_opps();
++		if (ret)
++			return ret;
++		ret = PTR_ERR_OR_ZERO(platform_device_register_full(&devinfo));
+ 	}
+-	of_node_put(np);
+-
+-	ret = qcom_cpufreq_populate_opps();
+-	if (ret)
+-		return ret;
+ 
+-	return PTR_ERR_OR_ZERO(platform_device_register_full(&devinfo));
++	return ret;
+ }
+ module_init(qcom_cpufreq_driver_init);
+ 
+--- a/drivers/cpufreq/s3c2416-cpufreq.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/cpufreq/s3c2416-cpufreq.c	2018-03-31 11:12:37.553203000 +0800
+@@ -400,6 +400,7 @@
+ 	rate = clk_get_rate(s3c_freq->hclk);
+ 	if (rate < 133 * 1000 * 1000) {
+ 		pr_err("cpufreq: HCLK not at 133MHz\n");
++		clk_put(s3c_freq->hclk);
+ 		ret = -EINVAL;
+ 		goto err_armclk;
+ 	}
