@@ -11,12 +11,12 @@ include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=wireguard
 
-PKG_VERSION:=0.0.20171221
+PKG_VERSION:=0.0.20180519
 PKG_RELEASE:=1
 
 PKG_SOURCE:=WireGuard-$(PKG_VERSION).tar.xz
 PKG_SOURCE_URL:=https://git.zx2c4.com/WireGuard/snapshot/
-PKG_HASH:=2b97697e9b271ba8836a04120a287b824648124f21d5309170ec51c1f86ac5ed
+PKG_HASH:=8846b3006c3f7e079bb38a4c985ccc2981e259f56c927b4cf47cbc1420e1c462
 
 PKG_LICENSE:=GPL-2.0 Apache-2.0
 PKG_LICENSE_FILES:=COPYING
@@ -60,6 +60,7 @@ include $(INCLUDE_DIR)/package-defaults.mk
 
 # Used by Build/Compile/Default
 MAKE_PATH:=src/tools
+MAKE_VARS += PLATFORM=linux
 
 define Build/Compile
 	$(MAKE) $(KERNEL_MAKEOPTS) M="$(PKG_BUILD_DIR)/src" modules
