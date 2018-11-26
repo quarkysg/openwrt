@@ -1,0 +1,1476 @@
+--- a/include/linux/if_pppol2tp.h	2018-11-26 15:43:12.866959199 +0800
++++ b/include/linux/if_pppol2tp.h	2018-11-26 15:44:00.210959199 +0800
+@@ -18,4 +18,28 @@
+ #include <linux/in6.h>
+ #include <uapi/linux/if_pppol2tp.h>
+ 
++/*
++ * Holds L2TP channel info
++ */
++struct  pppol2tp_common_addr {
++	int tunnel_version;				/* v2 or v3 */
++	__u32 local_tunnel_id, remote_tunnel_id;	/* tunnel id */
++	__u32 local_session_id, remote_session_id;	/* session id */
++	struct sockaddr_in local_addr, remote_addr; /* ip address and port */
++};
++
++/*
++ * L2TP channel operations
++ */
++struct pppol2tp_channel_ops {
++	struct ppp_channel_ops ops; /* ppp channel ops */
++};
++
++/*
++ * exported function which calls pppol2tp channel's get addressing
++ * function
++ */
++extern int pppol2tp_channel_addressing_get(struct ppp_channel *,
++					   struct pppol2tp_common_addr *);
++
+ #endif
+--- a/include/linux/if_pppox.h	2018-11-26 15:47:02.050959199 +0800
++++ b/include/linux/if_pppox.h	2018-11-26 15:48:04.042959199 +0800
+@@ -95,4 +95,45 @@
+     PPPOX_DEAD		= 16  /* dead, useless, please clean me up!*/
+ };
+ 
++/*
++ * PPPoE Channel specific operations
++ */
++struct pppoe_channel_ops {
++	/* Must be first - general to all PPP channels */
++	struct ppp_channel_ops ops;
++	void (*get_addressing)(struct ppp_channel *, struct pppoe_opt *);
++};
++
++/* PPTP client callback */
++typedef int (*pptp_gre_seq_offload_callback_t)(struct sk_buff *skb,
++					       struct net_device *pptp_dev);
++
++/* Return PPPoE channel specific addressing information */
++extern void pppoe_channel_addressing_get(struct ppp_channel *chan,
++					 struct pppoe_opt *addressing);
++
++/* Lookup PPTP session info and return PPTP session */
++extern int pptp_session_find(struct pptp_opt *opt, __be16 peer_call_id,
++			     __be32 peer_ip_addr);
++
++/* Return PPTP session information given the channel */
++extern void pptp_channel_addressing_get(struct pptp_opt *opt,
++					struct ppp_channel *chan);
++
++/* Enable the PPTP session offload flag */
++extern int pptp_session_enable_offload_mode(__be16 peer_call_id,
++					    __be32 peer_ip_addr);
++
++/* Disable the PPTP session offload flag */
++extern int pptp_session_disable_offload_mode(__be16 peer_call_id,
++					     __be32 peer_ip_addr);
++
++/* Register the PPTP GRE packets sequence number offload callback */
++extern int
++pptp_register_gre_seq_offload_callback(pptp_gre_seq_offload_callback_t
++				       pptp_client_cb);
++
++/* Unregister the PPTP GRE packets sequence number offload callback */
++extern void pptp_unregister_gre_seq_offload_callback(void);
++
+ #endif /* !(__LINUX_IF_PPPOX_H) */
+--- a/include/linux/if_vlan.h	2018-11-26 15:28:21.994959199 +0800
++++ b/include/linux/if_vlan.h	2018-11-26 15:52:04.954959199 +0800
+@@ -108,7 +108,15 @@
+ 
+ extern struct net_device *__vlan_find_dev_deep_rcu(struct net_device *real_dev,
+ 					       __be16 vlan_proto, u16 vlan_id);
++extern void __vlan_dev_update_accel_stats(struct net_device *dev,
++				    struct rtnl_link_stats64 *stats);
++
++extern u16 vlan_dev_get_egress_prio(struct net_device *dev, u32 skb_prio);
++
++extern struct net_device *__vlan_find_dev_deep(struct net_device *real_dev,
++					       __be16 vlan_proto, u16 vlan_id);
+ extern struct net_device *vlan_dev_real_dev(const struct net_device *dev);
++extern struct net_device *vlan_dev_next_dev(const struct net_device *dev);
+ extern u16 vlan_dev_vlan_id(const struct net_device *dev);
+ extern __be16 vlan_dev_vlan_proto(const struct net_device *dev);
+ 
+@@ -204,6 +212,19 @@
+ 	return vlan_dev_priv(dev)->nest_level;
+ }
+ #else
++tatic inline void __vlan_dev_update_accel_stats(struct net_device *dev,
++					   struct rtnl_link_stats64 *stats)
++{
++
++}
++
++static inline u16 vlan_dev_get_egress_prio(struct net_device *dev,
++						u32 skb_prio)
++{
++	return 0;
++}
++
++
+ static inline struct net_device *
+ __vlan_find_dev_deep_rcu(struct net_device *real_dev,
+ 		     __be16 vlan_proto, u16 vlan_id)
+--- a/include/linux/ppp_channel.h	2018-11-26 15:37:40.426959199 +0800
++++ b/include/linux/ppp_channel.h	2018-11-26 15:40:33.250959199 +0800
+@@ -46,6 +46,51 @@
+ };
+ 
+ #ifdef __KERNEL__
++/* Call this to obtain the underlying protocol of the PPP channel,
++ * e.g. PX_PROTO_OE
++ */
++extern int ppp_channel_get_protocol(struct ppp_channel *);
++
++/* Call this get protocol version */
++extern int ppp_channel_get_proto_version(struct ppp_channel *);
++
++/* Call this to hold a channel */
++extern bool ppp_channel_hold(struct ppp_channel *);
++
++/* Call this to release a hold you have upon a channel */
++extern void ppp_channel_release(struct ppp_channel *);
++
++/* Release hold on PPP channels */
++extern void ppp_release_channels(struct ppp_channel *channels[],
++				 unsigned int chan_sz);
++
++/* Hold PPP channels for the PPP device */
++extern int ppp_hold_channels(struct net_device *dev,
++			     struct ppp_channel *channels[],
++			     unsigned int chan_sz);
++/* Test if ppp xmit lock is locked */
++extern bool ppp_is_xmit_locked(struct net_device *dev);
++
++/* Hold PPP channels for the PPP device */
++extern int __ppp_hold_channels(struct net_device *dev,
++			       struct ppp_channel *channels[],
++			       unsigned int chan_sz);
++
++/* Test if the ppp device is a multi-link ppp device */
++extern int ppp_is_multilink(struct net_device *dev);
++
++/* Test if the ppp device is a multi-link ppp device */
++extern int __ppp_is_multilink(struct net_device *dev);
++
++/* Update statistics of the PPP net_device by incrementing related
++ * statistics field value with corresponding parameter
++ */
++extern void ppp_update_stats(struct net_device *dev, unsigned long rx_packets,
++			     unsigned long rx_bytes, unsigned long tx_packets,
++			     unsigned long tx_bytes, unsigned long rx_errors,
++			     unsigned long tx_errors, unsigned long rx_dropped,
++			     unsigned long tx_dropped);
++
+ /* Called by the channel when it can send some more data. */
+ extern void ppp_output_wakeup(struct ppp_channel *);
+ 
+--- a/include/net/ip6_route.h	2018-11-26 15:18:49.058957923 +0800
++++ b/include/net/ip6_route.h	2018-11-26 15:19:41.482952634 +0800
+@@ -139,6 +139,8 @@
+ void rt6_remove_prefsrc(struct inet6_ifaddr *ifp);
+ void rt6_clean_tohost(struct net *net, struct in6_addr *gateway);
+ 
++int rt6_register_notifier(struct notifier_block *nb);
++int rt6_unregister_notifier(struct notifier_block *nb);
+ 
+ /*
+  *	Store a destination cache entry in a socket
+--- a/include/net/neighbour.h	2018-11-26 15:56:54.378959199 +0800
++++ b/include/net/neighbour.h	2018-11-26 15:58:19.834959199 +0800
+@@ -232,6 +232,11 @@
+ 	return p->tbl->family;
+ }
+ 
++struct neigh_mac_update {
++	unsigned char old_mac[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
++	unsigned char update_mac[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))];
++};
++
+ #define NEIGH_PRIV_ALIGN	sizeof(long long)
+ #define NEIGH_ENTRY_SIZE(size)	ALIGN((size), NEIGH_PRIV_ALIGN)
+ 
+@@ -361,6 +366,9 @@
+ void pneigh_for_each(struct neigh_table *tbl,
+ 		     void (*cb)(struct pneigh_entry *));
+ 
++extern void neigh_mac_update_register_notify(struct notifier_block *nb);
++extern void neigh_mac_update_unregister_notify(struct notifier_block *nb);
++
+ struct neigh_seq_state {
+ 	struct seq_net_private p;
+ 	struct neigh_table *tbl;
+--- a/include/net/route.h	2018-11-26 15:17:39.404014333 +0800
++++ b/include/net/route.h	2018-11-26 15:17:55.979750030 +0800
+@@ -210,6 +210,9 @@
+ int ip_rt_ioctl(struct net *, unsigned int cmd, void __user *arg);
+ void ip_rt_get_source(u8 *src, struct sk_buff *skb, struct rtable *rt);
+ 
++int ip_rt_register_notifier(struct notifier_block *nb);
++int ip_rt_unregister_notifier(struct notifier_block *nb);
++
+ struct in_ifaddr;
+ void fib_add_ifaddr(struct in_ifaddr *);
+ void fib_del_ifaddr(struct in_ifaddr *, struct in_ifaddr *);
+--- a/include/linux/ppp_channel.h	2018-11-26 19:00:59.368277844 +0800
++++ b/include/linux/ppp_channel.h	2018-11-26 16:33:51.100400228 +0800
+@@ -1,3 +1,19 @@
++/*
++ **************************************************************************
++ * Copyright (c) 2016, The Linux Foundation.  All rights reserved.
++ * Permission to use, copy, modify, and/or distribute this software for
++ * any purpose with or without fee is hereby granted, provided that the
++ * above copyright notice and this permission notice appear in all copies.
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
++ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ **************************************************************************
++ */
++
+ #ifndef _PPP_CHANNEL_H_
+ #define _PPP_CHANNEL_H_
+ /*
+@@ -23,6 +39,7 @@
+ #include <linux/skbuff.h>
+ #include <linux/poll.h>
+ #include <net/net_namespace.h>
++#include <linux/ppp_defs.h>
+ 
+ struct ppp_channel;
+ 
+@@ -32,6 +49,16 @@
+ 	int	(*start_xmit)(struct ppp_channel *, struct sk_buff *);
+ 	/* Handle an ioctl call that has come in via /dev/ppp. */
+ 	int	(*ioctl)(struct ppp_channel *, unsigned int, unsigned long);
++	/* Get channel protocol type, one of PX_PROTO_XYZ or specific to
++	 * the channel subtype
++	 */
++	int (*get_channel_protocol)(struct ppp_channel *);
++	/* Get channel protocol version */
++	int (*get_channel_protocol_ver)(struct ppp_channel *);
++	/* Hold the channel from being destroyed */
++	void (*hold)(struct ppp_channel *);
++	/* Release hold on the channel */
++	void (*release)(struct ppp_channel *);
+ };
+ 
+ struct ppp_channel {
+@@ -114,6 +141,9 @@
+ /* Get the channel number for a channel */
+ extern int ppp_channel_index(struct ppp_channel *);
+ 
++/* Get the device index  associated with a channel, or 0, if none */
++extern int ppp_dev_index(struct ppp_channel *);
++
+ /* Get the unit number associated with a channel, or -1 if none */
+ extern int ppp_unit_number(struct ppp_channel *);
+ 
+--- a/drivers/net/ppp/ppp_generic.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/net/ppp/ppp_generic.c	2018-11-26 16:33:36.328400228 +0800
+@@ -1,4 +1,20 @@
+ /*
++ **************************************************************************
++ * Copyright (c) 2016, The Linux Foundation.  All rights reserved.
++ * Permission to use, copy, modify, and/or distribute this software for
++ * any purpose with or without fee is hereby granted, provided that the
++ * above copyright notice and this permission notice appear in all copies.
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
++ * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ **************************************************************************
++ */
++
++/*
+  * Generic PPP layer for Linux.
+  *
+  * Copyright 1999-2002 Paul Mackerras.
+@@ -49,6 +65,7 @@
+ #include <asm/unaligned.h>
+ #include <net/slhc_vj.h>
+ #include <linux/atomic.h>
++#include <linux/if_pppox.h>
+ 
+ #include <linux/nsproxy.h>
+ #include <net/net_namespace.h>
+@@ -2380,6 +2376,20 @@
+ 	return name;
+ }
+ 
++/* Return the PPP net device index */
++int ppp_dev_index(struct ppp_channel *chan)
++{
++	struct channel *pch = chan->ppp;
++	int ifindex = 0;
++
++	if (pch) {
++		read_lock_bh(&pch->upl);
++		if (pch->ppp && pch->ppp->dev)
++			ifindex = pch->ppp->dev->ifindex;
++		read_unlock_bh(&pch->upl);
++	}
++	return ifindex;
++}
+ 
+ /*
+  * Disconnect a channel from the generic layer.
+@@ -2939,6 +2949,8 @@
+ 	struct ppp_net *pn;
+ 	int ret = -ENXIO;
+ 	int hdrlen;
++	int ppp_proto;
++	int version;
+ 
+ 	pn = ppp_pernet(pch->chan_net);
+ 
+@@ -2961,9 +2973,27 @@
+ 	++ppp->n_channels;
+ 	pch->ppp = ppp;
+ 	atomic_inc(&ppp->file.refcnt);
++
++	/* Set the netdev priv flag if the prototype
++	 * is L2TP or PPTP. Return success in all cases
++	 */
++	if (!pch->chan)
++		goto out2;
++
++	ppp_proto = ppp_channel_get_protocol(pch->chan);
++	if (ppp_proto == PX_PROTO_PPTP) {
++		ppp->dev->priv_flags |= IFF_PPP_PPTP;
++	} else if (ppp_proto == PX_PROTO_OL2TP) {
++		version = ppp_channel_get_proto_version(pch->chan);
++		if (version == 2)
++			ppp->dev->priv_flags |= IFF_PPP_L2TPV2;
++		else if (version == 3)
++			ppp->dev->priv_flags |= IFF_PPP_L2TPV3;
++	}
++
++ out2:
+ 	ppp_unlock(ppp);
+ 	ret = 0;
+-
+  outl:
+ 	write_unlock_bh(&pch->upl);
+  out:
+@@ -3063,6 +3093,301 @@
+ 	return idr_find(p, n);
+ }
+ 
++/* Updates the PPP interface statistics. */
++void ppp_update_stats(struct net_device *dev, unsigned long rx_packets,
++		      unsigned long rx_bytes, unsigned long tx_packets,
++		      unsigned long tx_bytes, unsigned long rx_errors,
++		      unsigned long tx_errors, unsigned long rx_dropped,
++		      unsigned long tx_dropped)
++{
++	struct ppp *ppp;
++
++	if (!dev)
++		return;
++
++	if (dev->type != ARPHRD_PPP)
++		return;
++
++	ppp = netdev_priv(dev);
++
++	ppp_xmit_lock(ppp);
++	ppp->stats64.tx_packets += tx_packets;
++	ppp->stats64.tx_bytes += tx_bytes;
++	ppp->dev->stats.tx_errors += tx_errors;
++	ppp->dev->stats.tx_dropped += tx_dropped;
++	if (tx_packets)
++		ppp->last_xmit = jiffies;
++	ppp_xmit_unlock(ppp);
++
++	ppp_recv_lock(ppp);
++	ppp->stats64.rx_packets += rx_packets;
++	ppp->stats64.rx_bytes += rx_bytes;
++	ppp->dev->stats.rx_errors += rx_errors;
++	ppp->dev->stats.rx_dropped += rx_dropped;
++	if (rx_packets)
++		ppp->last_recv = jiffies;
++	ppp_recv_unlock(ppp);
++}
++
++/* Returns >0 if the device is a multilink PPP netdevice, 0 if not or < 0 if
++ * the device is not PPP.
++ */
++int ppp_is_multilink(struct net_device *dev)
++{
++	struct ppp *ppp;
++	unsigned int flags;
++
++	if (!dev)
++		return -1;
++
++	if (dev->type != ARPHRD_PPP)
++		return -1;
++
++	ppp = netdev_priv(dev);
++	ppp_lock(ppp);
++	flags = ppp->flags;
++	ppp_unlock(ppp);
++
++	if (flags & SC_MULTILINK)
++		return 1;
++
++	return 0;
++}
++EXPORT_SYMBOL(ppp_is_multilink);
++
++/* __ppp_is_multilink()
++ *	Returns >0 if the device is a multilink PPP netdevice, 0 if not or < 0
++ *	if the device is not PPP. Caller should acquire ppp_lock before calling
++ *	this function
++ */
++int __ppp_is_multilink(struct net_device *dev)
++{
++	struct ppp *ppp;
++	unsigned int flags;
++
++	if (!dev)
++		return -1;
++
++	if (dev->type != ARPHRD_PPP)
++		return -1;
++
++	ppp = netdev_priv(dev);
++	flags = ppp->flags;
++
++	if (flags & SC_MULTILINK)
++		return 1;
++
++	return 0;
++}
++EXPORT_SYMBOL(__ppp_is_multilink);
++
++/* ppp_channel_get_protocol()
++ *	Call this to obtain the underlying protocol of the PPP channel,
++ *	e.g. PX_PROTO_OE
++ *
++ * NOTE: Some channels do not use PX sockets so the protocol value may be very
++ * different for them.
++ * NOTE: -1 indicates failure.
++ * NOTE: Once you know the channel protocol you may then either cast 'chan' to
++ * its sub-class or use the channel protocol specific API's as provided by that
++ * channel sub type.
++ */
++int ppp_channel_get_protocol(struct ppp_channel *chan)
++{
++	if (!chan->ops->get_channel_protocol)
++		return -1;
++
++	return chan->ops->get_channel_protocol(chan);
++}
++EXPORT_SYMBOL(ppp_channel_get_protocol);
++
++/* ppp_channel_get_proto_version()
++ *	Call this to get channel protocol version
++ */
++int ppp_channel_get_proto_version(struct ppp_channel *chan)
++{
++	if (!chan->ops->get_channel_protocol_ver)
++		return -1;
++
++	return chan->ops->get_channel_protocol_ver(chan);
++}
++EXPORT_SYMBOL(ppp_channel_get_proto_version);
++
++/* ppp_channel_hold()
++ *	Call this to hold a channel.
++ *
++ * Returns true on success or false if the hold could not happen.
++ *
++ * NOTE: chan must be protected against destruction during this call -
++ * either by correct locking etc. or because you already have an implicit
++ * or explicit hold to the channel already and this is an additional hold.
++ */
++bool ppp_channel_hold(struct ppp_channel *chan)
++{
++	if (!chan->ops->hold)
++		return false;
++
++	chan->ops->hold(chan);
++	return true;
++}
++EXPORT_SYMBOL(ppp_channel_hold);
++
++/* ppp_channel_release()
++ *	Call this to release a hold you have upon a channel
++ */
++void ppp_channel_release(struct ppp_channel *chan)
++{
++	chan->ops->release(chan);
++}
++EXPORT_SYMBOL(ppp_channel_release);
++
++/* ppp_hold_channels()
++ *	Returns the PPP channels of the PPP device, storing each one into
++ *	channels[].
++ *
++ * channels[] has chan_sz elements.
++ * This function returns the number of channels stored, up to chan_sz.
++ * It will return < 0 if the device is not PPP.
++ *
++ * You MUST release the channels using ppp_release_channels().
++ */
++int ppp_hold_channels(struct net_device *dev, struct ppp_channel *channels[],
++		      unsigned int chan_sz)
++{
++	struct ppp *ppp;
++	int c;
++	struct channel *pch;
++
++	if (!dev)
++		return -1;
++
++	if (dev->type != ARPHRD_PPP)
++		return -1;
++
++	ppp = netdev_priv(dev);
++
++	c = 0;
++	ppp_lock(ppp);
++	list_for_each_entry(pch, &ppp->channels, clist) {
++		struct ppp_channel *chan;
++
++		if (!pch->chan) {
++			/* Channel is going / gone away */
++			continue;
++		}
++
++		if (c == chan_sz) {
++			/* No space to record channel */
++			ppp_unlock(ppp);
++			return c;
++		}
++
++		/* Hold the channel, if supported */
++		chan = pch->chan;
++		if (!chan->ops->hold)
++			continue;
++
++		chan->ops->hold(chan);
++
++		 /* Record the channel */
++		channels[c++] = chan;
++	}
++	ppp_unlock(ppp);
++	return c;
++}
++EXPORT_SYMBOL(ppp_hold_channels);
++
++/* __ppp_hold_channels()
++ *	Returns the PPP channels of the PPP device, storing each one
++ *	into channels[].
++ *
++ * channels[] has chan_sz elements.
++ * This function returns the number of channels stored, up to chan_sz.
++ * It will return < 0 if the device is not PPP.
++ *
++ * You MUST acquire ppp_lock and  release the channels using
++ * ppp_release_channels().
++ */
++int __ppp_hold_channels(struct net_device *dev, struct ppp_channel *channels[],
++			unsigned int chan_sz)
++{
++	struct ppp *ppp;
++	int c;
++	struct channel *pch;
++
++	if (!dev)
++		return -1;
++
++	if (dev->type != ARPHRD_PPP)
++		return -1;
++
++	ppp = netdev_priv(dev);
++
++	c = 0;
++	list_for_each_entry(pch, &ppp->channels, clist) {
++		struct ppp_channel *chan;
++
++		if (!pch->chan) {
++			/* Channel is going / gone away*/
++			continue;
++		}
++		if (c == chan_sz) {
++			/* No space to record channel */
++			return c;
++		}
++
++		/* Hold the channel, if supported */
++		chan = pch->chan;
++		if (!chan->ops->hold)
++			continue;
++
++		chan->ops->hold(chan);
++
++		/* Record the channel */
++		channels[c++] = chan;
++	}
++	return c;
++}
++EXPORT_SYMBOL(__ppp_hold_channels);
++
++/* ppp_release_channels()
++ *	Releases channels
++ */
++void ppp_release_channels(struct ppp_channel *channels[], unsigned int chan_sz)
++{
++	unsigned int c;
++
++	for (c = 0; c < chan_sz; ++c) {
++		struct ppp_channel *chan;
++
++		chan = channels[c];
++		chan->ops->release(chan);
++	}
++}
++EXPORT_SYMBOL(ppp_release_channels);
++
++/* Check if ppp xmit lock is on hold */
++bool ppp_is_xmit_locked(struct net_device *dev)
++{
++	struct ppp *ppp;
++
++	if (!dev)
++		return false;
++
++	if (dev->type != ARPHRD_PPP)
++		return false;
++
++	ppp = netdev_priv(dev);
++	if (!ppp)
++		return false;
++
++	if (spin_is_locked(&(ppp)->wlock))
++		return true;
++
++	return false;
++}
++EXPORT_SYMBOL(ppp_is_xmit_locked);
++
+ /* Module/initialization stuff */
+ 
+ module_init(ppp_init);
+@@ -3074,11 +3399,14 @@
+ EXPORT_SYMBOL(ppp_channel_index);
+ EXPORT_SYMBOL(ppp_unit_number);
+ EXPORT_SYMBOL(ppp_dev_name);
++EXPORT_SYMBOL(ppp_dev_index);
+ EXPORT_SYMBOL(ppp_input);
+ EXPORT_SYMBOL(ppp_input_error);
+ EXPORT_SYMBOL(ppp_output_wakeup);
+ EXPORT_SYMBOL(ppp_register_compressor);
+ EXPORT_SYMBOL(ppp_unregister_compressor);
++EXPORT_SYMBOL(ppp_update_stats);
++
+ MODULE_LICENSE("GPL");
+ MODULE_ALIAS_CHARDEV(PPP_MAJOR, 0);
+ MODULE_ALIAS("devname:ppp");
+--- a/net/l2tp/l2tp_core.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/l2tp/l2tp_core.c	2018-11-26 16:33:55.904400228 +0800
+@@ -304,6 +304,28 @@
+ }
+ EXPORT_SYMBOL_GPL(l2tp_session_get_nth);
+ 
++struct l2tp_session *l2tp_session_find_nth(struct l2tp_tunnel *tunnel, int nth)
++{
++	int hash;
++	struct l2tp_session *session;
++	int count = 0;
++
++	read_lock_bh(&tunnel->hlist_lock);
++	for (hash = 0; hash < L2TP_HASH_SIZE; hash++) {
++		hlist_for_each_entry(session, &tunnel->session_hlist[hash], hlist) {
++			if (++count > nth) {
++				read_unlock_bh(&tunnel->hlist_lock);
++				return session;
++			}
++		}
++	}
++
++	read_unlock_bh(&tunnel->hlist_lock);
++
++	return NULL;
++}
++EXPORT_SYMBOL_GPL(l2tp_session_find_nth);
++
+ /* Lookup a session by interface name.
+  * This is very inefficient but is only used by management interfaces.
+  */
+@@ -369,6 +365,30 @@
+ }
+ EXPORT_SYMBOL_GPL(l2tp_tunnel_find_nth);
+ 
++void l2tp_stats_update(struct l2tp_tunnel *tunnel,
++		       struct l2tp_session *session,
++		       struct l2tp_stats *stats)
++{
++	atomic_long_add(atomic_long_read(&stats->rx_packets),
++			&tunnel->stats.rx_packets);
++	atomic_long_add(atomic_long_read(&stats->rx_bytes),
++			&tunnel->stats.rx_bytes);
++	atomic_long_add(atomic_long_read(&stats->tx_packets),
++			&tunnel->stats.tx_packets);
++	atomic_long_add(atomic_long_read(&stats->tx_bytes),
++			&tunnel->stats.tx_bytes);
++
++	atomic_long_add(atomic_long_read(&stats->rx_packets),
++			&session->stats.rx_packets);
++	atomic_long_add(atomic_long_read(&stats->rx_bytes),
++			&session->stats.rx_bytes);
++	atomic_long_add(atomic_long_read(&stats->tx_packets),
++			&session->stats.tx_packets);
++	atomic_long_add(atomic_long_read(&stats->tx_bytes),
++			&session->stats.tx_bytes);
++}
++EXPORT_SYMBOL_GPL(l2tp_stats_update);
++
+ /*****************************************************************************
+  * Receive data handling
+  *****************************************************************************/
+--- a/net/l2tp/l2tp_core.h	2018-02-17 03:09:48.000000000 +0800
++++ b/net/l2tp/l2tp_core.h	2018-11-26 16:33:55.904400228 +0800
+@@ -248,9 +248,12 @@
+ 				       u32 session_id);
+ struct l2tp_session *l2tp_session_get_nth(struct l2tp_tunnel *tunnel, int nth,
+ 					  bool do_ref);
++struct l2tp_session *l2tp_session_find_nth(struct l2tp_tunnel *tunnel, int nth);
+ struct l2tp_session *l2tp_session_find_by_ifname(struct net *net, char *ifname);
+ struct l2tp_tunnel *l2tp_tunnel_find(struct net *net, u32 tunnel_id);
+ struct l2tp_tunnel *l2tp_tunnel_find_nth(struct net *net, int nth);
++void l2tp_stats_update(struct l2tp_tunnel *tunnel, struct l2tp_session *session,
++		       struct l2tp_stats *stats);
+ 
+ int l2tp_tunnel_create(struct net *net, int fd, int version, u32 tunnel_id,
+ 		       u32 peer_tunnel_id, struct l2tp_tunnel_cfg *cfg,
+--- a/net/l2tp/l2tp_ppp.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/l2tp/l2tp_ppp.c	2018-11-26 16:33:55.912400228 +0800
+@@ -98,6 +98,7 @@
+ #include <net/udp.h>
+ #include <net/xfrm.h>
+ #include <net/inet_common.h>
++#include <linux/if_pppox.h>
+ 
+ #include <asm/byteorder.h>
+ #include <linux/atomic.h>
+@@ -131,9 +132,16 @@
+ };
+ 
+ static int pppol2tp_xmit(struct ppp_channel *chan, struct sk_buff *skb);
+-
+-static const struct ppp_channel_ops pppol2tp_chan_ops = {
+-	.start_xmit =  pppol2tp_xmit,
++static int pppol2tp_get_channel_protocol(struct ppp_channel *);
++static int pppol2tp_get_channel_protocol_ver(struct ppp_channel *);
++static void pppol2tp_hold_chan(struct ppp_channel *);
++static void pppol2tp_release_chan(struct ppp_channel *);
++static const struct pppol2tp_channel_ops pppol2tp_chan_ops = {
++	.ops.start_xmit =  pppol2tp_xmit,
++	.ops.get_channel_protocol = pppol2tp_get_channel_protocol,
++	.ops.get_channel_protocol_ver = pppol2tp_get_channel_protocol_ver,
++	.ops.hold = pppol2tp_hold_chan,
++	.ops.release = pppol2tp_release_chan,
+ };
+ 
+ static const struct proto_ops pppol2tp_ops;
+@@ -251,6 +259,7 @@
+ 		nf_reset(skb);
+ 
+ 		po = pppox_sk(sk);
++		skb->skb_iif = ppp_dev_index(&po->chan);
+ 		ppp_input(&po->chan, skb);
+ 	} else {
+ 		l2tp_dbg(session, PPPOL2TP_MSG_DATA,
+@@ -368,6 +377,126 @@
+ 	return error;
+ }
+ 
++/* pppol2tp_hold_chan() */
++static void pppol2tp_hold_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_hold(sk);
++}
++
++/* pppol2tp_release_chan() */
++static void pppol2tp_release_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_put(sk);
++}
++
++/* pppol2tp_get_channel_protocol()
++ * Return the protocol type of the L2TP over PPP protocol
++ */
++static int pppol2tp_get_channel_protocol(struct ppp_channel *chan)
++{
++	return PX_PROTO_OL2TP;
++}
++
++/* pppol2tp_get_channel_protocol_ver()
++ * Return the protocol version of the L2TP over PPP protocol
++ */
++static int pppol2tp_get_channel_protocol_ver(struct ppp_channel *chan)
++{
++	struct sock *sk;
++	struct l2tp_session *session;
++	struct l2tp_tunnel *tunnel;
++	struct pppol2tp_session *ps;
++	int version = 0;
++
++	if (chan && chan->private)
++		sk = (struct sock *)chan->private;
++	else
++		return -1;
++
++	/* Get session and tunnel contexts from the socket */
++	session = pppol2tp_sock_to_session(sk);
++	if (!session)
++		return -1;
++
++	ps = l2tp_session_priv(session);
++	if (!ps->tunnel_sock) {
++		sock_put(sk);
++		return -1;
++	}
++
++	tunnel = l2tp_sock_to_tunnel(ps->tunnel_sock);
++	if (!tunnel) {
++		sock_put(sk);
++		return -1;
++	}
++
++	version = tunnel->version;
++
++	sock_put(ps->tunnel_sock);
++	sock_put(sk);
++
++	return version;
++}
++
++/* pppol2tp_get_addressing() */
++static int pppol2tp_get_addressing(struct ppp_channel *chan,
++				   struct pppol2tp_common_addr *addr)
++{
++	struct sock *sk = (struct sock *)chan->private;
++	struct sock *sk_tun;
++	struct l2tp_session *session;
++	struct l2tp_tunnel *tunnel;
++	struct pppol2tp_session *ps;
++	struct inet_sock *isk = NULL;
++	int err = -ENXIO;
++
++	/* Get session and tunnel contexts from the socket */
++	session = pppol2tp_sock_to_session(sk);
++	if (!session)
++		return err;
++
++	ps = l2tp_session_priv(session);
++	sk_tun = ps->tunnel_sock;
++	if (!sk_tun) {
++		sock_put(sk);
++		return err;
++	}
++
++	tunnel = l2tp_sock_to_tunnel(sk_tun);
++	if (!tunnel) {
++		sock_put(sk_tun);
++		sock_put(sk);
++		return err;
++	}
++	isk = inet_sk(ps->tunnel_sock);
++
++	addr->local_tunnel_id = tunnel->tunnel_id;
++	addr->remote_tunnel_id = tunnel->peer_tunnel_id;
++	addr->local_session_id = session->session_id;
++	addr->remote_session_id = session->peer_session_id;
++
++	addr->local_addr.sin_port = isk->inet_sport;
++	addr->remote_addr.sin_port = isk->inet_dport;
++	addr->local_addr.sin_addr.s_addr = isk->inet_saddr;
++	addr->remote_addr.sin_addr.s_addr = isk->inet_daddr;
++
++	sock_put(sk_tun);
++	sock_put(sk);
++	return 0;
++}
++
++/* pppol2tp_channel_addressing_get() */
++int pppol2tp_channel_addressing_get(struct ppp_channel *chan,
++				    struct pppol2tp_common_addr *addr)
++{
++	return pppol2tp_get_addressing(chan, addr);
++}
++EXPORT_SYMBOL(pppol2tp_channel_addressing_get);
++
+ /* Transmit function called by generic PPP driver.  Sends PPP frame
+  * over PPPoL2TP socket.
+  *
+@@ -421,6 +550,10 @@
+ 	__skb_push(skb, sizeof(ppph));
+ 	skb->data[0] = ppph[0];
+ 	skb->data[1] = ppph[1];
++	/* set incoming interface as the ppp interface */
++	if ((skb->protocol == htons(ETH_P_IP)) ||
++	    (skb->protocol == htons(ETH_P_IPV6)))
++		skb->skb_iif = ppp_dev_index(chan);
+ 
+ 	local_bh_disable();
+ 	l2tp_xmit_skb(session, skb, session->hdr_len);
+@@ -467,10 +600,6 @@
+ static void pppol2tp_session_destruct(struct sock *sk)
+ {
+ 	struct l2tp_session *session = sk->sk_user_data;
+-
+-	skb_queue_purge(&sk->sk_receive_queue);
+-	skb_queue_purge(&sk->sk_write_queue);
+-
+ 	if (session) {
+ 		sk->sk_user_data = NULL;
+ 		BUG_ON(session->magic != L2TP_SESSION_MAGIC);
+@@ -509,6 +638,9 @@
+ 		l2tp_session_queue_purge(session);
+ 		sock_put(sk);
+ 	}
++	skb_queue_purge(&sk->sk_receive_queue);
++	skb_queue_purge(&sk->sk_write_queue);
++
+ 	release_sock(sk);
+ 
+ 	/* This will delete the session context via
+@@ -780,7 +912,7 @@
+ 	po->chan.hdrlen = PPPOL2TP_L2TP_HDR_SIZE_NOSEQ;
+ 
+ 	po->chan.private = sk;
+-	po->chan.ops	 = &pppol2tp_chan_ops;
++	po->chan.ops	 = &pppol2tp_chan_ops.ops;
+ 	po->chan.mtu	 = session->mtu;
+ 
+ 	error = ppp_register_net_channel(sock_net(sk), &po->chan);
+@@ -1578,7 +1707,7 @@
+ 
+ static void pppol2tp_next_session(struct net *net, struct pppol2tp_seq_data *pd)
+ {
+-	pd->session = l2tp_session_get_nth(pd->tunnel, pd->session_idx, true);
++	pd->session = l2tp_session_find_nth(pd->tunnel, pd->session_idx);
+ 	pd->session_idx++;
+ 
+ 	if (pd->session == NULL) {
+@@ -1705,14 +1834,10 @@
+ 
+ 	/* Show the tunnel or session context.
+ 	 */
+-	if (!pd->session) {
++	if (pd->session == NULL)
+ 		pppol2tp_seq_tunnel_show(m, pd->tunnel);
+-	} else {
++	else
+ 		pppol2tp_seq_session_show(m, pd->session);
+-		if (pd->session->deref)
+-			pd->session->deref(pd->session);
+-		l2tp_session_dec_refcount(pd->session);
+-	}
+ 
+ out:
+ 	return 0;
+@@ -1871,4 +1996,4 @@
+ MODULE_LICENSE("GPL");
+ MODULE_VERSION(PPPOL2TP_DRV_VERSION);
+ MODULE_ALIAS("pppox-proto-" __stringify(PX_PROTO_OL2TP));
+-MODULE_ALIAS_L2TP_PWTYPE(7);
++MODULE_ALIAS_L2TP_PWTYPE(11);
+--- a/net/ipv6/ndisc.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/ipv6/ndisc.c	2018-11-26 16:33:55.800400228 +0800
+@@ -594,6 +594,7 @@
+ 
+ 	ndisc_send_skb(skb, daddr, saddr);
+ }
++EXPORT_SYMBOL(ndisc_send_ns);
+ 
+ void ndisc_send_rs(struct net_device *dev, const struct in6_addr *saddr,
+ 		   const struct in6_addr *daddr)
+--- a/net/ipv4/fib_trie.c	2018-11-26 19:00:58.816277844 +0800
++++ b/net/ipv4/fib_trie.c	2018-11-26 16:33:55.504400228 +0800
+@@ -1077,6 +1077,9 @@
+ 	return 0;
+ }
+ 
++/* Define route change notification chain. */
++static BLOCKING_NOTIFIER_HEAD(iproute_chain);
++
+ /* Caller must hold RTNL. */
+ int fib_table_insert(struct fib_table *tb, struct fib_config *cfg)
+ {
+@@ -1246,6 +1249,8 @@
+ 	rtmsg_fib(RTM_NEWROUTE, htonl(key), new_fa, plen, new_fa->tb_id,
+ 		  &cfg->fc_nlinfo, nlflags);
+ succeeded:
++	blocking_notifier_call_chain(&iproute_chain,
++				     RTM_NEWROUTE, fi);
+ 	return 0;
+ 
+ out_sw_fib_del:
+@@ -1554,6 +1559,8 @@
+ 	if (fa_to_delete->fa_state & FA_S_ACCESSED)
+ 		rt_cache_flush(cfg->fc_nlinfo.nl_net);
+ 
++	blocking_notifier_call_chain(&iproute_chain,
++				     RTM_DELROUTE, fa_to_delete->fa_info);
+ 	fib_release_info(fa_to_delete->fa_info);
+ 	alias_free_mem_rcu(fa_to_delete);
+ 	return 0;
+@@ -1906,8 +1913,6 @@
+ 
+ 	/* rcu_read_lock is hold by caller */
+ 	hlist_for_each_entry_rcu(fa, &l->leaf, fa_list) {
+-		int err;
+-
+ 		if (i < s_i) {
+ 			i++;
+ 			continue;
+@@ -1918,14 +1923,17 @@
+ 			continue;
+ 		}
+ 
+-		err = fib_dump_info(skb, NETLINK_CB(cb->skb).portid,
+-				    cb->nlh->nlmsg_seq, RTM_NEWROUTE,
+-				    tb->tb_id, fa->fa_type,
+-				    xkey, KEYLENGTH - fa->fa_slen,
+-				    fa->fa_tos, fa->fa_info, NLM_F_MULTI);
+-		if (err < 0) {
++		if (fib_dump_info(skb, NETLINK_CB(cb->skb).portid,
++				  cb->nlh->nlmsg_seq,
++				  RTM_NEWROUTE,
++				  tb->tb_id,
++				  fa->fa_type,
++				  xkey,
++				  KEYLENGTH - fa->fa_slen,
++				  fa->fa_tos,
++				  fa->fa_info, NLM_F_MULTI) < 0) {
+ 			cb->args[4] = i;
+-			return err;
++			return -1;
+ 		}
+ 		i++;
+ 	}
+@@ -1947,13 +1955,10 @@
+ 	t_key key = cb->args[3];
+ 
+ 	while ((l = leaf_walk_rcu(&tp, key)) != NULL) {
+-		int err;
+-
+-		err = fn_trie_dump_leaf(l, tb, skb, cb);
+-		if (err < 0) {
++		if (fn_trie_dump_leaf(l, tb, skb, cb) < 0) {
+ 			cb->args[3] = key;
+ 			cb->args[2] = count;
+-			return err;
++			return -1;
+ 		}
+ 
+ 		++count;
+@@ -1984,6 +1989,18 @@
+ 					   0, SLAB_PANIC, NULL);
+ }
+ 
++int ip_rt_register_notifier(struct notifier_block *nb)
++{
++	return blocking_notifier_chain_register(&iproute_chain, nb);
++}
++EXPORT_SYMBOL(ip_rt_register_notifier);
++
++int ip_rt_unregister_notifier(struct notifier_block *nb)
++{
++	return blocking_notifier_chain_unregister(&iproute_chain, nb);
++}
++EXPORT_SYMBOL(ip_rt_unregister_notifier);
++
+ struct fib_table *fib_trie_table(u32 id, struct fib_table *alias)
+ {
+ 	struct fib_table *tb;
+--- a/include/linux/if_pppox.h	2018-11-26 19:00:59.368277844 +0800
++++ b/include/linux/if_pppox.h	2018-11-26 16:33:50.556400228 +0800
+@@ -12,6 +28,7 @@
+  *		2 of the License, or (at your option) any later version.
+  *
+  */
++
+ #ifndef __LINUX_IF_PPPOX_H
+ #define __LINUX_IF_PPPOX_H
+ 
+@@ -42,6 +59,7 @@
+ 	u32 ack_sent, ack_recv;
+ 	u32 seq_sent, seq_recv;
+ 	int ppp_flags;
++	bool pptp_offload_mode;
+ };
+ #include <net/sock.h>
+ 
+--- a/drivers/net/ppp/pptp.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/ppp/pptp.c	2018-11-26 16:33:36.328400228 +0800
+@@ -53,6 +53,8 @@
+ static const struct ppp_channel_ops pptp_chan_ops;
+ static const struct proto_ops pptp_ops;
+ 
++static pptp_gre_seq_offload_callback_t __rcu pptp_gre_offload_xmit_cb;
++
+ #define PPP_LCP_ECHOREQ 0x09
+ #define PPP_LCP_ECHOREP 0x0A
+ #define SC_RCV_BITS	(SC_RCV_B7_1|SC_RCV_B7_0|SC_RCV_ODDP|SC_RCV_EVNP)
+@@ -129,6 +131,53 @@
+ 	return i < MAX_CALLID;
+ }
+ 
++/* Search a pptp session based on peer call id and peer ip address */
++static int lookup_session_dst(struct pptp_opt *opt, u16 call_id, __be32 d_addr)
++{
++	struct pppox_sock *sock;
++	int i = 1;
++
++	rcu_read_lock();
++	for_each_set_bit_from(i, callid_bitmap, MAX_CALLID) {
++		sock = rcu_dereference(callid_sock[i]);
++		if (!sock)
++			continue;
++
++		if (sock->proto.pptp.dst_addr.call_id == call_id &&
++		    sock->proto.pptp.dst_addr.sin_addr.s_addr == d_addr) {
++			sock_hold(sk_pppox(sock));
++			memcpy(opt, &sock->proto.pptp, sizeof(struct pptp_opt));
++			sock_put(sk_pppox(sock));
++			rcu_read_unlock();
++			return 0;
++		}
++	}
++	rcu_read_unlock();
++	return -EINVAL;
++}
++
++/* If offload mode set then this function sends all packets to
++ * offload module instead of network stack
++ */
++static int pptp_client_skb_xmit(struct sk_buff *skb,
++				struct net_device *pptp_dev)
++{
++	pptp_gre_seq_offload_callback_t pptp_gre_offload_cb_f;
++	int ret;
++
++	rcu_read_lock();
++	pptp_gre_offload_cb_f = rcu_dereference(pptp_gre_offload_xmit_cb);
++
++	if (!pptp_gre_offload_cb_f) {
++		rcu_read_unlock();
++		return -1;
++	}
++
++	ret = pptp_gre_offload_cb_f(skb, pptp_dev);
++	rcu_read_unlock();
++	return ret;
++}
++
+ static int add_chan(struct pppox_sock *sock,
+ 		    struct pptp_addr *sa)
+ {
+@@ -185,8 +234,11 @@
+ 
+ 	struct rtable *rt;
+ 	struct net_device *tdev;
++	struct net_device *pptp_dev;
+ 	struct iphdr  *iph;
+ 	int    max_headroom;
++	int    pptp_ifindex;
++	int ret;
+ 
+ 	if (sk_pppox(po)->sk_state & PPPOX_DEAD)
+ 		goto tx_error;
+@@ -286,9 +338,33 @@
+ 	ip_select_ident(net, skb, NULL);
+ 	ip_send_check(iph);
+ 
+-	ip_local_out(net, skb->sk, skb);
+-	return 1;
++	pptp_ifindex = ppp_dev_index(chan);
+ 
++	/* set incoming interface as the ppp interface */
++	if (skb->skb_iif)
++		skb->skb_iif = pptp_ifindex;
++
++	/* If the PPTP GRE seq number offload module is not enabled yet
++	 * then sends all PPTP GRE packets through linux network stack
++	 */
++	if (!opt->pptp_offload_mode) {
++		ip_local_out(net, skb->sk, skb);
++		return 1;
++	}
++
++	pptp_dev = dev_get_by_index(&init_net, pptp_ifindex);
++	if (!pptp_dev)
++		goto tx_error;
++
++	 /* If PPTP offload module is enabled then forward all PPTP GRE
++	  * packets to PPTP GRE offload module
++	  */
++	ret = pptp_client_skb_xmit(skb, pptp_dev);
++	dev_put(pptp_dev);
++	if (ret < 0)
++		goto tx_error;
++
++	return 1;
+ tx_error:
+ 	kfree_skb(skb);
+ 	return 1;
+@@ -344,6 +420,13 @@
+ 		goto drop;
+ 
+ 	payload = skb->data + headersize;
++
++	 /* If offload is enabled, we expect the offload module
++	  * to handle PPTP GRE sequence number checks
++	  */
++	if (opt->pptp_offload_mode)
++		goto allow_packet;
++
+ 	/* check for expected sequence number */
+ 	if (seq < opt->seq_recv + 1 || WRAPPED(opt->seq_recv, seq)) {
+ 		if ((payload[0] == PPP_ALLSTATIONS) && (payload[1] == PPP_UI) &&
+@@ -406,6 +489,7 @@
+ 	if (po) {
+ 		skb_dst_drop(skb);
+ 		nf_reset(skb);
++		skb->skb_iif = ppp_dev_index(&po->chan);
+ 		return sk_receive_skb(sk_pppox(po), skb, 0);
+ 	}
+ drop:
+@@ -513,7 +597,7 @@
+ 
+ 	opt->dst_addr = sp->sa_addr.pptp;
+ 	sk->sk_state |= PPPOX_CONNECTED;
+-
++	opt->pptp_offload_mode = false;
+  end:
+ 	release_sock(sk);
+ 	return error;
+@@ -645,9 +729,155 @@
+ 	return err;
+ }
+ 
++/* pptp_channel_addressing_get()
++ *	Return PPTP channel specific addressing information.
++ */
++void pptp_channel_addressing_get(struct pptp_opt *opt, struct ppp_channel *chan)
++{
++	struct sock *sk;
++	struct pppox_sock *po;
++
++	if (!opt)
++		return;
++
++	sk = (struct sock *)chan->private;
++	if (!sk)
++		return;
++
++	sock_hold(sk);
++
++	/* This is very unlikely, but check the socket is connected state */
++	if (unlikely(sock_flag(sk, SOCK_DEAD) ||
++		     !(sk->sk_state & PPPOX_CONNECTED))) {
++		sock_put(sk);
++		return;
++	}
++
++	po = pppox_sk(sk);
++	memcpy(opt, &po->proto.pptp, sizeof(struct pptp_opt));
++	sock_put(sk);
++}
++EXPORT_SYMBOL(pptp_channel_addressing_get);
++
++/* pptp_session_find()
++ *	Search and return a PPTP session info based on peer callid and IP
++ *	address. The function accepts the parameters in network byte order.
++ */
++int pptp_session_find(struct pptp_opt *opt, __be16 peer_call_id,
++		      __be32 peer_ip_addr)
++{
++	if (!opt)
++		return -EINVAL;
++
++	return lookup_session_dst(opt, ntohs(peer_call_id), peer_ip_addr);
++}
++EXPORT_SYMBOL(pptp_session_find);
++
++ /* Function to change the offload mode true/false for a PPTP session */
++static int pptp_set_offload_mode(bool accel_mode,
++				 __be16 peer_call_id, __be32 peer_ip_addr)
++{
++	struct pppox_sock *sock;
++	int i = 1;
++
++	rcu_read_lock();
++	for_each_set_bit_from(i, callid_bitmap, MAX_CALLID) {
++		sock = rcu_dereference(callid_sock[i]);
++		if (!sock)
++			continue;
++
++		if (sock->proto.pptp.dst_addr.call_id == peer_call_id &&
++		    sock->proto.pptp.dst_addr.sin_addr.s_addr == peer_ip_addr) {
++			sock_hold(sk_pppox(sock));
++			sock->proto.pptp.pptp_offload_mode = accel_mode;
++			sock_put(sk_pppox(sock));
++			rcu_read_unlock();
++			return 0;
++		}
++	}
++	rcu_read_unlock();
++	return -EINVAL;
++}
++
++/* Enable the PPTP session offload flag */
++int pptp_session_enable_offload_mode(__be16 peer_call_id, __be32 peer_ip_addr)
++{
++	return pptp_set_offload_mode(true, peer_call_id, peer_ip_addr);
++}
++EXPORT_SYMBOL(pptp_session_enable_offload_mode);
++
++/* Disable the PPTP session offload flag */
++int pptp_session_disable_offload_mode(__be16 peer_call_id, __be32 peer_ip_addr)
++{
++	return pptp_set_offload_mode(false, peer_call_id, peer_ip_addr);
++}
++EXPORT_SYMBOL(pptp_session_disable_offload_mode);
++
++/* Register the offload callback function on behalf of the module which
++ * will own the sequence and acknowledgment number updates for all
++ * PPTP GRE packets. All PPTP GRE packets are then transmitted to this
++ * module after encapsulation in order to ensure the correct seq/ack
++ * fields are set in the packets before transmission. This is required
++ * when PPTP flows are offloaded to acceleration engines, in-order to
++ * ensure consistency in sequence and ack numbers between PPTP control
++ * (PPP LCP) and data packets
++ */
++int pptp_register_gre_seq_offload_callback(pptp_gre_seq_offload_callback_t
++					   pptp_gre_offload_cb)
++{
++	pptp_gre_seq_offload_callback_t pptp_gre_offload_cb_f;
++
++	rcu_read_lock();
++	pptp_gre_offload_cb_f = rcu_dereference(pptp_gre_offload_xmit_cb);
++
++	if (pptp_gre_offload_cb_f) {
++		rcu_read_unlock();
++		return -1;
++	}
++
++	rcu_assign_pointer(pptp_gre_offload_xmit_cb, pptp_gre_offload_cb);
++	rcu_read_unlock();
++	return 0;
++}
++EXPORT_SYMBOL(pptp_register_gre_seq_offload_callback);
++
++/* Unregister the PPTP GRE packets sequence number offload callback */
++void pptp_unregister_gre_seq_offload_callback(void)
++{
++	rcu_assign_pointer(pptp_gre_offload_xmit_cb, NULL);
++}
++EXPORT_SYMBOL(pptp_unregister_gre_seq_offload_callback);
++
++/* pptp_hold_chan() */
++static void pptp_hold_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_hold(sk);
++}
++
++/* pptp_release_chan() */
++static void pptp_release_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_put(sk);
++}
++
++/* pptp_get_channel_protocol()
++ *     Return the protocol type of the PPTP over PPP protocol
++ */
++static int pptp_get_channel_protocol(struct ppp_channel *chan)
++{
++	return PX_PROTO_PPTP;
++}
++
+ static const struct ppp_channel_ops pptp_chan_ops = {
+ 	.start_xmit = pptp_xmit,
+ 	.ioctl      = pptp_ppp_ioctl,
++	.get_channel_protocol = pptp_get_channel_protocol,
++	.hold = pptp_hold_chan,
++	.release = pptp_release_chan,
+ };
+ 
+ static struct proto pptp_sk_proto __read_mostly = {
+--- a/net/ipv6/route.c	2018-11-26 19:00:58.744277844 +0800
++++ b/net/ipv6/route.c	2018-11-26 16:33:55.832400228 +0800
+@@ -177,6 +177,9 @@
+ 	return dst_metrics_write_ptr(rt->dst.from);
+ }
+ 
++/* Define route change notification chain. */
++ATOMIC_NOTIFIER_HEAD(ip6route_chain);
++
+ static u32 *ipv6_cow_metrics(struct dst_entry *dst, unsigned long old)
+ {
+ 	struct rt6_info *rt = (struct rt6_info *)dst;
+@@ -2047,6 +2037,9 @@
+ 		goto out;
+ 
+ 	err = __ip6_ins_rt(rt, &cfg->fc_nlinfo, &mxc);
++	if (!err)
++		atomic_notifier_call_chain(&ip6route_chain,
++					   RTM_NEWROUTE, rt);
+ 
+ 	kfree(mxc.mx);
+ 
+@@ -2075,6 +2068,9 @@
+ 	err = fib6_del(rt, info);
+ 	write_unlock_bh(&table->tb6_lock);
+ 
++	if (!err)
++		atomic_notifier_call_chain(&ip6route_chain,
++					   RTM_DELROUTE, rt);
+ out:
+ 	ip6_rt_put(rt);
+ 	return err;
+@@ -3432,6 +3441,19 @@
+ 	return NOTIFY_OK;
+ }
+ 
++int rt6_register_notifier(struct notifier_block *nb)
++{
++	return atomic_notifier_chain_register(&ip6route_chain, nb);
++}
++EXPORT_SYMBOL(rt6_register_notifier);
++
++int rt6_unregister_notifier(struct notifier_block *nb)
++{
++	return atomic_notifier_chain_unregister(&ip6route_chain, nb);
++}
++EXPORT_SYMBOL(rt6_unregister_notifier);
++
++
+ /*
+  *	/proc
+  */
