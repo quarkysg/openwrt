@@ -2320,12 +2320,337 @@
  /* Update bridge statistics for bridge packets processed by offload engines */
  void br_dev_update_stats(struct net_device *dev,
  			 struct rtnl_link_stats64 *nlstats)
-@@ -601,7 +673,7 @@
- 		return;
+--- a/net/bridge/br_private.h	2018-11-26 17:00:47.116400228 +0800
++++ b/net/bridge/br_private.h	2018-11-26 16:33:55.204400228 +0800
+@@ -21,6 +21,8 @@
+ #include <net/ip6_fib.h>
+ #include <linux/if_vlan.h>
+ #include <linux/rhashtable.h>
++#include <linux/export.h>
++#include <linux/netfilter.h>
  
- 	br = netdev_priv(dev);
--	stats = this_cpu_ptr(br->stats);
-+	stats = per_cpu_ptr(br->stats, 0);
+ #define BR_HASH_BITS 8
+ #define BR_HASH_SIZE (1 << BR_HASH_BITS)
+@@ -506,6 +509,7 @@
+ void br_manage_promisc(struct net_bridge *br);
  
- 	u64_stats_update_begin(&stats->syncp);
- 	stats->rx_packets += nlstats->rx_packets;
+ /* br_input.c */
++int br_pass_frame_up(struct sk_buff *skb);
+ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb);
+ rx_handler_result_t br_handle_frame(struct sk_buff **pskb);
+ 
+@@ -905,15 +909,29 @@
+ 
+ /* br_netfilter.c */
+ #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
++extern int brnf_call_ebtables;
+ int br_nf_core_init(void);
+ void br_nf_core_fini(void);
+ void br_netfilter_rtable_init(struct net_bridge *);
++bool br_netfilter_run_hooks(void);
+ #else
+ static inline int br_nf_core_init(void) { return 0; }
+ static inline void br_nf_core_fini(void) {}
+ #define br_netfilter_rtable_init(x)
++#define br_netfilter_run_hooks()	false
+ #endif
+ 
++static inline int
++BR_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk,
++	struct sk_buff *skb, struct net_device *in, struct net_device *out,
++	int (*okfn)(struct net *, struct sock *, struct sk_buff *))
++{
++	if (!br_netfilter_run_hooks())
++		return okfn(net, sk, skb);
++
++	return NF_HOOK(pf, hook, net, sk, skb, in, out, okfn);
++}
++
+ /* br_stp.c */
+ void br_log_state(const struct net_bridge_port *p);
+ void br_set_state(struct net_bridge_port *p, unsigned int state);
+@@ -984,4 +1002,15 @@
+ static inline void br_sysfs_delbr(struct net_device *dev) { return; }
+ #endif /* CONFIG_SYSFS */
+ 
++#define __br_get(__hook, __default, __args ...) \
++		(__hook ? (__hook(__args)) : (__default))
++
++static inline void __br_notify(int group, int type, const void *data)
++{
++	br_notify_hook_t *notify_hook = rcu_dereference(br_notify_hook);
++
++	if (notify_hook)
++		notify_hook(group, type, data);
++}
++
+ #endif
+--- a/include/linux/netdevice.h	2018-11-26 17:26:46.672400228 +0800
++++ b/inlcude/linux/netdevice.h	2018-11-26 16:33:50.960400228 +0800
+@@ -777,6 +775,17 @@
+ typedef u16 (*select_queue_fallback_t)(struct net_device *dev,
+ 				       struct sk_buff *skb);
+ 
++#ifdef CONFIG_RFS_ACCEL
++typedef int (*set_rfs_filter_callback_t)(struct net_device *dev,
++				     __be32 src,
++				     __be32 dst,
++				     __be16 sport,
++				     __be16 dport,
++				     u8 proto,
++				     u16 rxq_index,
++				     u32 action);
++#endif
++
+ /*
+  * This structure defines the management hooks for network devices.
+  * The following hooks can be defined; unless noted otherwise, they are
+@@ -948,6 +957,10 @@
+  *	Set hardware filter for RFS.  rxq_index is the target queue index;
+  *	flow_id is a flow ID to be passed to rps_may_expire_flow() later.
+  *	Return the filter ID on success, or a negative error code.
++ * int (*ndo_register_rfs_filter(struct net_device *dev,
++ *			    set_rfs_filter_callback_t set_filter);
++ *	Register callback to handle commands for low layer RFS filter engine.
++ *	Return 0 on success, or a negative error code.
+  *
+  *	Get Default VLAN tag
+  * int (*ndo_get_default_vlan_tag)(struct net_device *net);
+@@ -1168,6 +1181,8 @@
+ 						     const struct sk_buff *skb,
+ 						     u16 rxq_index,
+ 						     u32 flow_id);
++	int	(*ndo_register_rfs_filter)(struct net_device *dev,
++					set_rfs_filter_callback_t set_filter);
+ 	int			(*ndo_get_default_vlan_tag)(struct net_device *net);
+ #endif
+ 	int			(*ndo_add_slave)(struct net_device *dev,
+@@ -1304,6 +1319,12 @@
+ 	IFF_OPENVSWITCH			= 1<<22,
+ 	IFF_L3MDEV_SLAVE		= 1<<23,
+ 	IFF_NO_IP_ALIGN			= 1<<24,
++	IFF_TUN_TAP			= 1<<25,
++	IFF_PPP_L2TPV2			= 1<<26,
++	IFF_PPP_L2TPV3			= 1<<27,
++	IFF_PPP_PPTP			= 1<<28,
++	IFF_GRE_V4_TAP			= 1<<29,
++	IFF_GRE_V6_TAP			= 1<<30,
+ };
+ 
+ #define IFF_802_1Q_VLAN			IFF_802_1Q_VLAN
+@@ -1331,6 +1352,7 @@
+ #define IFF_OPENVSWITCH			IFF_OPENVSWITCH
+ #define IFF_L3MDEV_SLAVE		IFF_L3MDEV_SLAVE
+ #define IFF_NO_IP_ALIGN			IFF_NO_IP_ALIGN
++#define IFF_TUN_TAP			IFF_TUN_TAP
+ 
+ /**
+  *	struct net_device - The DEVICE structure.
+@@ -2179,6 +2199,8 @@
+ #define NETDEV_CHANGEINFODATA	0x0018
+ #define NETDEV_BONDING_INFO	0x0019
+ #define NETDEV_PRECHANGEUPPER	0x001A
++#define NETDEV_BR_JOIN		0x001B
++#define NETDEV_BR_LEAVE		0x001C
+ 
+ int register_netdevice_notifier(struct notifier_block *nb);
+ int unregister_netdevice_notifier(struct notifier_block *nb);
+--- a/net/bridge/br_input.c	2018-11-26 18:19:15.562298228 +0800
++++ b/net/bridge/br_input.c	2018-11-26 17:15:52.644400228 +0800
+@@ -33,7 +33,15 @@
+ 	return netif_receive_skb(skb);
+ }
+ 
+-static int br_pass_frame_up(struct sk_buff *skb)
++/* Hook for external Multicast handler */
++br_multicast_handle_hook_t __rcu *br_multicast_handle_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_multicast_handle_hook);
++
++/* Hook for external forwarding logic */
++br_get_dst_hook_t __rcu *br_get_dst_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_get_dst_hook);
++
++int br_pass_frame_up(struct sk_buff *skb)
+ {
+ 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
+ 	struct net_bridge *br = netdev_priv(brdev);
+@@ -62,10 +70,11 @@
+ 	if (!skb)
+ 		return NET_RX_DROP;
+ 
+-	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
++	return BR_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+ 		       dev_net(indev), NULL, skb, indev, NULL,
+ 		       br_netif_receive_skb);
+ }
++EXPORT_SYMBOL_GPL(br_pass_frame_up);
+ 
+ static void br_do_proxy_arp(struct sk_buff *skb, struct net_bridge *br,
+ 			    u16 vid, struct net_bridge_port *p)
+@@ -135,6 +144,8 @@
+ 	struct net_bridge_fdb_entry *dst;
+ 	struct net_bridge_mdb_entry *mdst;
+ 	struct sk_buff *skb2;
++	struct net_bridge_port *pdst = NULL;
++	br_get_dst_hook_t *get_dst_hook = rcu_dereference(br_get_dst_hook);
+ 	bool unicast = true;
+ 	u16 vid = 0;
+ 
+@@ -177,6 +188,11 @@
+ 		skb2 = skb;
+ 		unicast = false;
+ 	} else if (is_multicast_ether_addr(dest)) {
++		br_multicast_handle_hook_t *multicast_handle_hook =
++			rcu_dereference(br_multicast_handle_hook);
++		if (!__br_get(multicast_handle_hook, true, p, skb))
++			goto out;
++
+ 		mdst = br_mdb_get(br, skb, vid);
+ 		if ((mdst || BR_INPUT_SKB_CB_MROUTERS_ONLY(skb)) &&
+ 		    br_multicast_querier_exists(br, eth_hdr(skb))) {
+@@ -192,18 +208,31 @@
+ 
+ 		unicast = false;
+ 		br->dev->stats.multicast++;
+-	} else if ((p->flags & BR_ISOLATE_MODE) ||
+-		   ((dst = __br_fdb_get(br, dest, vid)) && dst->is_local)) {
+-		skb2 = skb;
+-		/* Do not forward the packet since it's local. */
+-		skb = NULL;
++	} else {
++		pdst = __br_get(get_dst_hook, NULL, p, &skb);
++		if (pdst) {
++			if (!skb)
++				goto out;
++		} else {
++			dst = __br_fdb_get(br, dest, vid);
++			if ((p->flags & BR_ISOLATE_MODE) ||
++			    (dst && dst->is_local)) {
++				skb2 = skb;
++				/* Do not forward the packet since it's local.*/
++				skb = NULL;
++			}
++		}
+ 	}
+ 
+ 	if (skb) {
+ 		if (dst) {
+ 			dst->used = jiffies;
+-			br_forward(dst->dst, skb, skb2);
+-		} else
++			pdst = dst->dst;
++		}
++
++		if (pdst)
++			br_forward(pdst, skb, skb2);
++		else
+ 			br_flood_forward(br, skb, skb2, unicast);
+ 	}
+ 
+@@ -291,7 +320,7 @@
+ 		}
+ 
+ 		/* Deliver packet to local host only */
+-		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
++		if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+ 			    dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+ 			    br_handle_local_finish)) {
+ 			return RX_HANDLER_CONSUMED; /* consumed by filter */
+@@ -304,16 +333,19 @@
+ forward:
+ 	switch (p->state) {
+ 	case BR_STATE_DISABLED:
+-		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+-			skb->pkt_type = PACKET_HOST;
++		if (skb->protocol == htons(ETH_P_PAE)) {
++			if (ether_addr_equal(p->br->dev->dev_addr, dest))
++				skb->pkt_type = PACKET_HOST;
++
++			if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL,
++				skb, skb->dev, NULL, br_handle_local_finish))
++				break;
+ 
+-		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+-			br_handle_local_finish))
++			BR_INPUT_SKB_CB(skb)->brdev = p->br->dev;
++			br_pass_frame_up(skb);
+ 			break;
+-
+-		BR_INPUT_SKB_CB(skb)->brdev = p->br->dev;
+-		br_pass_frame_up(skb);
+-		break;
++		}
++		goto drop;
+ 
+ 	case BR_STATE_FORWARDING:
+ 		rhook = rcu_dereference(br_should_route_hook);
+@@ -329,7 +361,7 @@
+ 		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+ 			skb->pkt_type = PACKET_HOST;
+ 
+-		NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
++		BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
+ 			dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+ 			br_handle_frame_finish);
+ 		break;
+--- a/net/bridge/br.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/bridge/br.c	2018-11-26 16:33:55.188400228 +0800
+@@ -266,6 +266,10 @@
+ 	br_fdb_fini();
+ }
+ 
++/* Hook for bridge event notifications */
++br_notify_hook_t __rcu *br_notify_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_notify_hook);
++
+ module_init(br_init)
+ module_exit(br_deinit)
+ MODULE_LICENSE("GPL");
+--- a/net/bridge/br_netfilter_hooks.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/bridge/br_netfilter_hooks.c	2018-11-26 17:15:52.644400228 +0800
+@@ -49,6 +49,7 @@
+ static int brnf_call_iptables __read_mostly = 1;
+ static int brnf_call_ip6tables __read_mostly = 1;
+ static int brnf_call_arptables __read_mostly = 1;
++static int brnf_call_custom __read_mostly;
+ static int brnf_filter_vlan_tagged __read_mostly;
+ static int brnf_filter_pppoe_tagged __read_mostly;
+ static int brnf_pass_vlan_indev __read_mostly;
+@@ -56,6 +57,7 @@
+ #define brnf_call_iptables 1
+ #define brnf_call_ip6tables 1
+ #define brnf_call_arptables 1
++#define brnf_call_custom 1
+ #define brnf_filter_vlan_tagged 0
+ #define brnf_filter_pppoe_tagged 0
+ #define brnf_pass_vlan_indev 0
+@@ -70,6 +72,15 @@
+ #define IS_ARP(skb) \
+ 	(!skb_vlan_tag_present(skb) && skb->protocol == htons(ETH_P_ARP))
+ 
++int brnf_call_ebtables __read_mostly;
++EXPORT_SYMBOL_GPL(brnf_call_ebtables);
++
++bool br_netfilter_run_hooks(void)
++{
++	return brnf_call_iptables | brnf_call_ip6tables | brnf_call_arptables |
++		brnf_call_ebtables | brnf_call_custom;
++}
++
+ static inline __be16 vlan_proto(const struct sk_buff *skb)
+ {
+ 	if (skb_vlan_tag_present(skb))
+@@ -975,6 +984,13 @@
+ 		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+ 		.proc_handler	= brnf_sysctl_call_tables,
++	},
++	{
++		.procname	= "bridge-nf-call-custom",
++		.data		= &brnf_call_custom,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= brnf_sysctl_call_tables,
+ 	},
+ 	{ }
+ };
