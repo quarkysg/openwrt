@@ -2045,3 +2045,287 @@
 +		void *cmd_buf, size_t size);
 +
  #endif
+--- a/net/bridge/br_fdb.c	2018-11-26 16:43:50.008400228 +0800
++++ b/net/bridge/br_fdb.c	2018-11-26 16:51:00.936400228 +0800
+@@ -38,6 +38,20 @@
+ 
+ static u32 fdb_salt __read_mostly;
+ 
++ATOMIC_NOTIFIER_HEAD(br_fdb_notifier_list);
++
++void br_fdb_register_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_register(&br_fdb_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_register_notify);
++
++void br_fdb_unregister_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_unregister(&br_fdb_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_unregister_notify);
++
+ int __init br_fdb_init(void)
+ {
+ 	br_fdb_cache = kmem_cache_create("bridge_fdb_cache",
+@@ -289,12 +303,27 @@
+ 	spin_unlock_bh(&br->hash_lock);
+ }
+ 
++ATOMIC_NOTIFIER_HEAD(br_fdb_update_notifier_list);
++
++void br_fdb_update_register_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_register(&br_fdb_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_update_register_notify);
++
++void br_fdb_update_unregister_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_unregister(&br_fdb_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_update_unregister_notify);
++
+ void br_fdb_cleanup(unsigned long _data)
+ {
+ 	struct net_bridge *br = (struct net_bridge *)_data;
+ 	unsigned long delay = hold_time(br);
+ 	unsigned long next_timer = jiffies + br->ageing_time;
+ 	int i;
++	u8 mac_addr[6];
+ 
+ 	spin_lock(&br->hash_lock);
+ 	for (i = 0; i < BR_HASH_SIZE; i++) {
+@@ -308,10 +337,15 @@
+ 			if (f->added_by_external_learn)
+ 				continue;
+ 			this_timer = f->updated + delay;
+-			if (time_before_eq(this_timer, jiffies))
++			if (time_before_eq(this_timer, jiffies)) {
++				ether_addr_copy(mac_addr, f->addr.addr);
+ 				fdb_delete(br, f);
+-			else if (time_before(this_timer, next_timer))
++				atomic_notifier_call_chain(
++					&br_fdb_update_notifier_list, 0,
++					(void *)mac_addr);
++			} else if (time_before(this_timer, next_timer)) {
+ 				next_timer = this_timer;
++			}
+ 		}
+ 	}
+ 	spin_unlock(&br->hash_lock);
+@@ -389,6 +423,7 @@
+ 
+ 	return NULL;
+ }
++EXPORT_SYMBOL_GPL(__br_fdb_get);
+ 
+ #if IS_ENABLED(CONFIG_ATM_LANE)
+ /* Interface used by ATM LANE hook to test
+@@ -590,6 +625,10 @@
+ 			if (unlikely(source != fdb->dst)) {
+ 				fdb->dst = source;
+ 				fdb_modified = true;
++
++				atomic_notifier_call_chain(
++					&br_fdb_update_notifier_list,
++					0, (void *)addr);
+ 			}
+ 			fdb->updated = jiffies;
+ 			if (unlikely(added_by_user))
+@@ -614,8 +653,46 @@
+ 	}
+ }
+ 
++/* Refresh FDB entries for bridge packets being forwarded by offload engines */
++void br_refresh_fdb_entry(struct net_device *dev, const char *addr)
++{
++	struct net_bridge_port *p = br_port_get_rcu(dev);
++
++	if (!p || p->state == BR_STATE_DISABLED)
++		return;
++
++	if (!is_valid_ether_addr(addr)) {
++		pr_info("bridge: Attempt to refresh with invalid ether address %pM\n",
++			addr);
++		return;
++	}
++
++	rcu_read_lock();
++	br_fdb_update(p->br, p, addr, 0, true);
++	rcu_read_unlock();
++}
++EXPORT_SYMBOL_GPL(br_refresh_fdb_entry);
++
++/* Look up the MAC address in the device's bridge fdb table */
++struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
++					      const char *addr, __u16 vid)
++{
++	struct net_bridge_port *p = br_port_get_rcu(dev);
++	struct net_bridge_fdb_entry *fdb;
++
++	if (!p || p->state == BR_STATE_DISABLED)
++		return NULL;
++
++	rcu_read_lock();
++	fdb = fdb_find_rcu(&p->br->hash[br_mac_hash(addr, vid)], addr, vid);
++	rcu_read_unlock();
++
++	return fdb;
++}
++EXPORT_SYMBOL_GPL(br_fdb_has_entry);
++
+ static int fdb_to_nud(const struct net_bridge *br,
+-		      const struct net_bridge_fdb_entry *fdb)
++			const struct net_bridge_fdb_entry *fdb)
+ {
+ 	if (fdb->is_local)
+ 		return NUD_PERMANENT;
+@@ -687,6 +764,23 @@
+ 	struct sk_buff *skb;
+ 	int err = -ENOBUFS;
+ 
++	if (fdb->dst) {
++		int event;
++		struct br_fdb_event fdb_event;
++
++		if (type == RTM_NEWNEIGH)
++			event = BR_FDB_EVENT_ADD;
++		else
++			event = BR_FDB_EVENT_DEL;
++
++		fdb_event.dev = fdb->dst->dev;
++		ether_addr_copy(fdb_event.addr, fdb->addr.addr);
++		fdb_event.is_local = fdb->is_local;
++		atomic_notifier_call_chain(&br_fdb_notifier_list,
++					   event,
++					   (void *)&fdb_event);
++	}
++
+ 	skb = nlmsg_new(fdb_nlmsg_size(), GFP_ATOMIC);
+ 	if (skb == NULL)
+ 		goto errout;
+@@ -698,6 +792,7 @@
+ 		kfree_skb(skb);
+ 		goto errout;
+ 	}
++	__br_notify(RTNLGRP_NEIGH, type, fdb);
+ 	rtnl_notify(skb, net, 0, RTNLGRP_NEIGH, NULL, GFP_ATOMIC);
+ 	return;
+ errout:
+--- a/net/bridge/br_if.c	2018-11-26 16:52:39.656400228 +0800
++++ b/net/bridge/br_if.c	2018-11-26 16:52:46.280400228 +0800
+@@ -1,4 +1,10 @@
+ /*
++ **************************************************************************
++ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
++ **************************************************************************
++ */
++
++/*
+  *	Userspace interface
+  *	Linux ethernet bridge
+  *
+@@ -28,6 +34,10 @@
+ 
+ #include "br_private.h"
+ 
++/* Hook for external forwarding logic */
++br_port_dev_get_hook_t __rcu *br_port_dev_get_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_port_dev_get_hook);
++
+ /*
+  * Determine initial path cost based on speed.
+  * using recommendations from 802.1d standard
+@@ -530,6 +540,7 @@
+ 	dev_set_mtu(br->dev, br_min_mtu(br));
+ 
+ 	kobject_uevent(&p->kobj, KOBJ_ADD);
++	call_netdevice_notifiers(NETDEV_BR_JOIN, dev);
+ 
+ 	return 0;
+ 
+@@ -561,6 +572,8 @@
+ 	if (!p || p->br != br)
+ 		return -EINVAL;
+ 
++	call_netdevice_notifiers(NETDEV_BR_LEAVE, dev);
++
+ 	/* Since more than one interface can be attached to a bridge,
+ 	 * there still maybe an alternate path for netconsole to use;
+ 	 * therefore there is no reason for a NETDEV_RELEASE event.
+@@ -589,6 +602,65 @@
+ 		nbp_update_port_count(br);
+ }
+ 
++/* br_port_dev_get()
++ *      If a skb is provided, and the br_port_dev_get_hook_t hook exists,
++ *      use that to try and determine the egress port for that skb.
++ *      If not, or no egress port could be determined, use the given addr
++ *      to identify the port to which it is reachable,
++ *	returing a reference to the net device associated with that port.
++ *
++ * NOTE: Return NULL if given dev is not a bridge or the mac has no
++ * associated port.
++ */
++struct net_device *br_port_dev_get(struct net_device *dev, unsigned char *addr,
++				   struct sk_buff *skb,
++				   unsigned int cookie)
++{
++	struct net_bridge_fdb_entry *fdbe;
++	struct net_bridge *br;
++	struct net_device *netdev = NULL;
++
++	/* Is this a bridge? */
++	if (!(dev->priv_flags & IFF_EBRIDGE))
++		return NULL;
++
++	rcu_read_lock();
++
++	/* If the hook exists and the skb isn't NULL, try and get the port */
++	if (skb) {
++		br_port_dev_get_hook_t *port_dev_get_hook;
++
++		port_dev_get_hook = rcu_dereference(br_port_dev_get_hook);
++		if (port_dev_get_hook) {
++			struct net_bridge_port *pdst =
++				__br_get(port_dev_get_hook, NULL, dev, skb,
++					 addr, cookie);
++			if (pdst) {
++				dev_hold(pdst->dev);
++				netdev = pdst->dev;
++				goto out;
++			}
++		}
++	}
++
++	/* Either there is no hook, or can't
++	 * determine the port to use - fall back to using FDB
++	 */
++
++	br = netdev_priv(dev);
++
++	/* Lookup the fdb entry and get reference to the port dev */
++	fdbe = __br_fdb_get(br, addr, 0);
++	if (fdbe && fdbe->dst) {
++		netdev = fdbe->dst->dev; /* port device */
++		dev_hold(netdev);
++	}
++out:
++	rcu_read_unlock();
++	return netdev;
++}
++EXPORT_SYMBOL_GPL(br_port_dev_get);
++
+ /* Update bridge statistics for bridge packets processed by offload engines */
+ void br_dev_update_stats(struct net_device *dev,
+ 			 struct rtnl_link_stats64 *nlstats)
+@@ -601,7 +673,7 @@
+ 		return;
+ 
+ 	br = netdev_priv(dev);
+-	stats = this_cpu_ptr(br->stats);
++	stats = per_cpu_ptr(br->stats, 0);
+ 
+ 	u64_stats_update_begin(&stats->syncp);
+ 	stats->rx_packets += nlstats->rx_packets;
