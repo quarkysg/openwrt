@@ -1474,3 +1474,244 @@
  /*
   *	/proc
   */
+--- a/net/ipv6/addrconf.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/ipv6/addrconf.c	2018-11-26 16:33:55.768400228 +0800
+@@ -1768,6 +1768,35 @@
+ 	return result;
+ }
+ 
++/* ipv6_dev_find()
++ *	Find (and hold) net device that has the given address.
++ *	Or NULL on failure.
++ */
++struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr,
++				 int strict)
++{
++	struct inet6_ifaddr *ifp;
++	struct net_device *dev;
++
++	ifp = ipv6_get_ifaddr(net, addr, NULL, strict);
++	if (!ifp)
++		return NULL;
++
++	if (!ifp->idev) {
++		in6_ifa_put(ifp);
++		return NULL;
++	}
++
++	dev = ifp->idev->dev;
++	if (dev)
++		dev_hold(dev);
++
++	in6_ifa_put(ifp);
++
++	return dev;
++}
++EXPORT_SYMBOL(ipv6_dev_find);
++
+ /* Gets referenced address, destroys ifaddr */
+ 
+ static void addrconf_dad_stop(struct inet6_ifaddr *ifp, int dad_failed)
+--- a/net/8021q/vlan_core.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/8021q/vlan_core.c	2018-11-26 16:33:55.044400228 +0800
+@@ -64,6 +64,46 @@
+ 	return true;
+ }
+ 
++/* Update the VLAN device with statistics from network offload engines */
++void __vlan_dev_update_accel_stats(struct net_device *dev,
++				   struct rtnl_link_stats64 *nlstats)
++{
++	struct vlan_pcpu_stats *stats;
++
++	if (!is_vlan_dev(dev))
++		return;
++
++	stats = per_cpu_ptr(vlan_dev_priv(dev)->vlan_pcpu_stats, 0);
++
++	u64_stats_update_begin(&stats->syncp);
++	stats->rx_packets += nlstats->rx_packets;
++	stats->rx_bytes += nlstats->rx_bytes;
++	stats->tx_packets += nlstats->tx_packets;
++	stats->tx_bytes += nlstats->tx_bytes;
++	u64_stats_update_end(&stats->syncp);
++}
++EXPORT_SYMBOL(__vlan_dev_update_accel_stats);
++
++/* Lookup the 802.1p egress_map table and return the 802.1p value */
++u16 vlan_dev_get_egress_prio(struct net_device *dev, u32 skb_prio)
++{
++	struct vlan_priority_tci_mapping *mp;
++
++	mp = vlan_dev_priv(dev)->egress_priority_map[(skb_prio & 0xf)];
++	while (mp) {
++		if (mp->priority == skb_prio) {
++			/* This should already be shifted
++			 * to mask correctly with the
++			 * VLAN's TCI
++			 */
++			return mp->vlan_qos;
++		}
++		mp = mp->next;
++	}
++	return 0;
++}
++EXPORT_SYMBOL(vlan_dev_get_egress_prio);
++
+ /* Must be invoked with rcu_read_lock. */
+ struct net_device *__vlan_find_dev_deep_rcu(struct net_device *dev,
+ 					__be16 vlan_proto, u16 vlan_id)
+@@ -102,6 +142,12 @@
+ }
+ EXPORT_SYMBOL(vlan_dev_real_dev);
+ 
++struct net_device *vlan_dev_next_dev(const struct net_device *dev)
++{
++	return vlan_dev_priv(dev)->real_dev;
++}
++EXPORT_SYMBOL(vlan_dev_next_dev);
++
+ u16 vlan_dev_vlan_id(const struct net_device *dev)
+ {
+ 	return vlan_dev_priv(dev)->vlan_id;
+--- a/drivers/net/ppp/pppoe.c	2018-02-17 03:09:48.000000000 +0800
++++ b/drivers/net/ppp/pppoe.c	2018-11-26 16:33:36.328400228 +0800
+@@ -988,8 +988,74 @@
+ 	return __pppoe_xmit(sk, skb);
+ }
+ 
++/************************************************************************
++ *
++ * function called by generic PPP driver to hold channel
++ *
++ ***********************************************************************/
++static void pppoe_hold_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_hold(sk);
++}
++
++/************************************************************************
++ *
++ * function called by generic PPP driver to release channel
++ *
++ ***********************************************************************/
++static void pppoe_release_chan(struct ppp_channel *chan)
++{
++	struct sock *sk = (struct sock *)chan->private;
++
++	sock_put(sk);
++}
++
++/************************************************************************
++ *
++ * function called to get the channel protocol type
++ *
++ ***********************************************************************/
++static int pppoe_get_channel_protocol(struct ppp_channel *chan)
++{
++	return PX_PROTO_OE;
++}
++
++/************************************************************************
++ *
++ * function called to get the PPPoE channel addressing
++ * NOTE: This function returns a HOLD to the netdevice
++ *
++ ***********************************************************************/
++static void pppoe_get_addressing(struct ppp_channel *chan,
++				 struct pppoe_opt *addressing)
++{
++	struct sock *sk = (struct sock *)chan->private;
++	struct pppox_sock *po = pppox_sk(sk);
++
++	*addressing = po->proto.pppoe;
++	if (addressing->dev)
++		dev_hold(addressing->dev);
++}
++
++/* pppoe_channel_addressing_get()
++ *	Return PPPoE channel specific addressing information.
++ */
++void pppoe_channel_addressing_get(struct ppp_channel *chan,
++				  struct pppoe_opt *addressing)
++{
++	pppoe_get_addressing(chan, addressing);
++}
++EXPORT_SYMBOL(pppoe_channel_addressing_get);
++
+ static const struct ppp_channel_ops pppoe_chan_ops = {
++	/* PPPoE specific channel ops */
++	/*.get_addressing = pppoe_get_addressing,*/
+ 	.start_xmit = pppoe_xmit,
++	.get_channel_protocol = pppoe_get_channel_protocol,
++	.hold = pppoe_hold_chan,
++	.release = pppoe_release_chan,
+ };
+ 
+ static int pppoe_recvmsg(struct socket *sock, struct msghdr *m,
+--- a/net/core/neighbour.c	2018-02-17 03:09:48.000000000 +0800
++++ b/net/core/neighbour.c	2018-11-26 16:33:55.352400228 +0800
+@@ -1050,7 +1049,19 @@
+ 	}
+ }
+ 
++ATOMIC_NOTIFIER_HEAD(neigh_mac_update_notifier_list);
+ 
++void neigh_mac_update_register_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_register(&neigh_mac_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(neigh_mac_update_register_notify);
++
++void neigh_mac_update_unregister_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_unregister(&neigh_mac_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(neigh_mac_update_unregister_notify);
+ 
+ /* Generic update routine.
+    -- lladdr is new lladdr or NULL, if it is not supplied.
+@@ -1081,6 +1092,7 @@
+ 	int notify = 0;
+ 	struct net_device *dev;
+ 	int update_isrouter = 0;
++	struct neigh_mac_update nmu;
+ 
+ 	write_lock_bh(&neigh->lock);
+ 
+@@ -1088,6 +1100,8 @@
+ 	old    = neigh->nud_state;
+ 	err    = -EPERM;
+ 
++	memset(&nmu, 0, sizeof(struct neigh_mac_update));
++
+ 	if (!(flags & NEIGH_UPDATE_F_ADMIN) &&
+ 	    (old & (NUD_NOARP | NUD_PERMANENT)))
+ 		goto out;
+@@ -1118,7 +1132,11 @@
+ 		   and a new address is proposed:
+ 		   - compare new & old
+ 		   - if they are different, check override flag
++		   - copy old and new addresses for neigh update notification
+ 		 */
++		memcpy(nmu.old_mac, neigh->ha, dev->addr_len);
++		memcpy(nmu.update_mac, lladdr, dev->addr_len);
++
+ 		if ((old & NUD_VALID) &&
+ 		    !memcmp(lladdr, neigh->ha, dev->addr_len))
+ 			lladdr = neigh->ha;
+@@ -1232,8 +1250,11 @@
+ 	}
+ 	write_unlock_bh(&neigh->lock);
+ 
+-	if (notify)
++	if (notify) {
+ 		neigh_update_notify(neigh);
++		atomic_notifier_call_chain(&neigh_mac_update_notifier_list, 0,
++					   (struct neigh_mac_update *)&nmu);
++	}
+ 
+ 	return err;
+ }
