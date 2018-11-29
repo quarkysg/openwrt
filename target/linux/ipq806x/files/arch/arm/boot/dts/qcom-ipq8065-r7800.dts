@@ -444,24 +444,27 @@
 			qcom,rst_addr = <0x40000000>;
 			qcom,load_addr = <0x40000000>;
 			qcom,turbo_frequency = <1>;
+
 			qcom,ipv4_enabled = <1>;
 			qcom,ipv4_reasm_enabled = <1>;
 			qcom,ipv6_enabled = <1>;
 			qcom,ipv6_reasm_enabled = <1>;
 			qcom,l2switch_enabled = <1>;
-			qcom,crypto_enabled = <0>;
-			qcom,ipsec_enabled = <0>;
 			qcom,wlanredirect_enabled = <1>;
 			qcom,tun6rd_enabled = <1>;
 			qcom,l2tpv2_enabled = <1>;
 			qcom,tunipip6_enabled = <1>;
-			qcom,gre_redir_enabled = <1>;
+			qcom,gre_tunnel_enabled = <1>;
 			qcom,shaping_enabled = <1>;
-			qcom,gmac0_enabled = <1>;
+			qcom,wlan_dataplane_offload_enabled = <1>;
+			qcom,pptp_enabled = <1>;
+			qcom,portid_enabled = <1>;
+			qcom,map_t_enabled = <1>;
+
+			qcom,gmac0_enabled = <0>;
 			qcom,gmac1_enabled = <1>;
 			qcom,gmac2_enabled = <1>;
-			qcom,gmac3_enabled = <1>;
-			qcom,wifioffload_enabled = <1>;
+			qcom,gmac3_enabled = <0>;
 		};
 
 		nss1: nss@40800000 {
@@ -479,24 +482,16 @@
 			qcom,rst_addr = <0x40800000>;
 			qcom,load_addr = <0x40800000>;
 			qcom,turbo_frequency = <1>;
-			qcom,ipv4_enabled = <0>;
-			qcom,ipv4_reasm_enabled = <0>;
-			qcom,ipv6_enabled = <0>;
-			qcom,ipv6_reasm_enabled = <0>;
-			qcom,l2switch_enabled = <0>;
+
+			qcom,capwap-enabled = <1>;
 			qcom,crypto_enabled = <1>;
+			qcom,dtls-enabled = <1>;
 			qcom,ipsec_enabled = <1>;
-			qcom,wlanredirect_enabled = <0>;
-			qcom,tun6rd_enabled = <0>;
-			qcom,l2tpv2_enabled = <0>;
-			qcom,tunipip6_enabled = <0>;
-			qcom,gre_redir_enabled = <0>;
-			qcom,shaping_enabled = <0>;
+
 			qcom,gmac0_enabled = <0>;
 			qcom,gmac1_enabled = <0>;
 			qcom,gmac2_enabled = <0>;
 			qcom,gmac3_enabled = <0>;
-			qcom,wifioffload_enabled = <0>;
 		};
 
 		gmac1: ethernet@37200000 {
