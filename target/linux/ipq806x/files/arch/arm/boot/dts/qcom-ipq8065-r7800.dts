@@ -483,14 +483,14 @@
 			qcom,load_addr = <0x40800000>;
 			qcom,turbo_frequency = <1>;
 
-			qcom,capwap-enabled = <1>;
+			qcom,capwap_enabled = <1>;
 			qcom,crypto_enabled = <1>;
-			qcom,dtls-enabled = <1>;
+			qcom,dtls_enabled = <1>;
 			qcom,ipsec_enabled = <1>;
 
 			qcom,gmac0_enabled = <0>;
-			qcom,gmac1_enabled = <0>;
-			qcom,gmac2_enabled = <0>;
+			qcom,gmac1_enabled = <1>;
+			qcom,gmac2_enabled = <1>;
 			qcom,gmac3_enabled = <0>;
 		};
 
