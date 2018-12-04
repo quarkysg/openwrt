@@ -1,5 +1,7 @@
 #include "qcom-ipq8064.dtsi"
 
+#include <dt-bindings/clock/qcom,rpmcc.h>
+
 / {
 	model = "Qualcomm IPQ8065";
 	compatible = "qcom,ipq8065", "qcom,ipq8064";
@@ -57,6 +59,37 @@
 			 < 384000000 775000 >;
 	};
 
+	nss-common {
+		compatible = "qcom,nss-common";
+		reg = <0x03000000 0x00001000>;
+		reg-names = "nss_fpb_base";
+		clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK>,
+			 <&rpmcc RPM_NSS_FABRIC_0_CLK>, <&rpmcc RPM_NSS_FABRIC_1_CLK>;
+		clock-names = "nss-core-clk", "nss-tcm-clk",
+			      "nss-fab0-clk", "nss-fab0-clk";
+		nss_core-supply = <&smb208_s1b>;
+		nss_core_vdd_nominal = <1100000>;
+		nss_core_vdd_high = <1150000>;
+		nss_core_threshold_freq = <733000000>;
+	};
+
+	fab-scaling {
+		compatible = "qcom,fab-scaling";
+		clocks = <&rpmcc RPM_APPS_FABRIC_CLK>, <&rpmcc RPM_EBI1_CLK>;
+		clock-names = "apps-fab-clk", "ddr-fab-clk";
+		fab_freq_high = <533000000>;
+		fab_freq_nominal = <400000000>;
+	};
+
+	firmware {
+		scm {
+			compatible = "qcom,scm-ipq806x";
+		};
+		qfprom {
+			compatible = "qcom,qfprom-sec";
+		};
+	};
+
 	soc: soc {
 
 		rpm@108000 {
@@ -73,6 +106,20 @@
 					regulator-max-microvolt = <1275000>;
 				};
 			};
+		};
+
+		nss0: nss@40000000 {
+			compatible = "qcom,nss";
+			qcom,low-frequency = <110000000>;
+			qcom,mid-frequency = <600000000>;
+			qcom,max-frequency = <800000000>;
+		};
+
+		nss1: nss@40800000 {
+			compatible = "qcom,nss";
+			qcom,low-frequency = <110000000>;
+			qcom,mid-frequency = <600000000>;
+			qcom,max-frequency = <800000000>;
 		};
 
 		/* Temporary fixed regulator */

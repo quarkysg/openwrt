@@ -366,8 +366,8 @@
 				read-only;
 			};
 
-			firmware@1480000 {
-				label = "firmware";
+			nandfw@1480000 {
+				label = "nandfw";
 				reg = <0x1480000 0x6480000>;
 			};
 		};
@@ -421,6 +421,68 @@
 					0x0000c 0x80        /* PAD6_MODE */
 					>;
 			};
+		};
+
+		nss0: nss@40000000 {
+			compatible = "qcom,nss";
+			interrupts = <GIC_SPI 213 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 232 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x36000000 0x1000 0x39000000 0x10000>;
+			reg-names = "nphys", "vphys";
+			clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK_SRC>,
+				 <&gcc NSSTCM_CLK>, <&rpmcc RPM_NSS_FABRIC_0_CLK>,
+				 <&rpmcc RPM_NSS_FABRIC_1_CLK>;
+			clock-names = "nss-core-clk", "nss-tcm-src",
+				      "nss-tcm-clk", "nss-fab0-clk",
+				      "nss-fab1-clk";
+			resets = <&gcc UBI32_CORE1_CLKRST_CLAMP_RESET>,
+				 <&gcc UBI32_CORE1_CLAMP_RESET>,
+				 <&gcc UBI32_CORE1_AHB_RESET>,
+				 <&gcc UBI32_CORE1_AXI_RESET>;
+			reset-names = "clkrst-clamp", "clamp", "ahb", "axi";
+
+			qcom,id = <0>;
+			qcom,num-irq = <2>;
+			qcom,num-queue = <2>;
+			qcom,load-addr = <0x40000000>;
+			qcom,turbo-frequency;
+
+			qcom,ipv4-enabled;
+			qcom,ipv6-enabled;
+			qcom,l2tpv2-enabled;
+			qcom,gre-enabled;
+			qcom,map-t-enabled;
+			qcom,pptp-enabled;
+			qcom,portid-enabled;
+			qcom,shaping-enabled;
+			qcom,tun6rd-enabled;
+			qcom,tunipip6-enabled;
+			qcom,wlan-dataplane-offload-enabled;
+			qcom,wlanredirect-enabled;
+		};
+
+		nss1: nss@40800000 {
+			compatible = "qcom,nss";
+			interrupts = <GIC_SPI 214 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 233 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x36400000 0x1000 0x39010000 0x10000>;
+			reg-names = "nphys", "vphys";
+			resets = <&gcc UBI32_CORE2_CLKRST_CLAMP_RESET>,
+				 <&gcc UBI32_CORE2_CLAMP_RESET>,
+				 <&gcc UBI32_CORE2_AHB_RESET>,
+				 <&gcc UBI32_CORE2_AXI_RESET>;
+			reset-names = "clkrst-clamp", "clamp", "ahb", "axi";
+
+			qcom,id = <1>;
+			qcom,num-irq = <2>;
+			qcom,load-addr = <0x40800000>;
+			qcom,num-queue = <2>;
+			qcom,turbo-frequency;
+
+			qcom,capwap-enabled;
+			qcom,crypto-enabled;
+			qcom,dtls-enabled;
+			qcom,ipsec-enabled;
 		};
 
 		nss-gmac-common {
