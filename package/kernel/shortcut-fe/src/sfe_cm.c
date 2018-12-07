@@ -2,7 +2,7 @@
  * sfe-cm.c
  *	Shortcut forwarding engine connection manager.
  *
- * Copyright (c) 2013-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
  * above copyright notice and this permission notice appear in all copies.
@@ -29,10 +29,8 @@
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_core.h>
-#include <net/netfilter/nf_conntrack_timeout.h>
 #include <linux/netfilter/xt_dscp.h>
 #include <linux/if_bridge.h>
-#include <net/pkt_sched.h>
 
 #include "sfe.h"
 #include "sfe_cm.h"
@@ -103,7 +101,6 @@ struct sfe_cm {
 
 static struct sfe_cm __sc;
 
-
 /*
  * sfe_cm_incr_exceptions()
  *	increase an exception counter.
@@ -123,7 +120,7 @@ static inline void sfe_cm_incr_exceptions(sfe_cm_exception_t except)
  *
  * Returns 1 if the packet is forwarded or 0 if it isn't.
  */
-static int sfe_cm_recv(struct sk_buff *skb)
+int sfe_cm_recv(struct sk_buff *skb)
 {
 	struct net_device *dev;
 
@@ -135,16 +132,6 @@ static int sfe_cm_recv(struct sk_buff *skb)
 	barrier();
 
 	dev = skb->dev;
-
-#ifdef CONFIG_NET_CLS_ACT
-	/*
-	 * If ingress Qdisc configured, and packet not processed by ingress Qdisc yet
-	 * We cannot accelerate this packet.
-	 */
-	if (dev->ingress_queue && !(skb->tc_verd & TC_NCLS)) {
-		return 0;
-	}
-#endif
 
 	/*
 	 * We're only interested in IPv4 and IPv6 packets.
@@ -241,7 +228,7 @@ static bool sfe_cm_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device 
 	}
 
 	rcu_read_lock();
-	neigh = dst_neigh_lookup(dst, addr);
+	neigh = sfe_dst_get_neighbour(dst, addr);
 	if (unlikely(!neigh)) {
 		rcu_read_unlock();
 		dst_release(dst);
@@ -619,7 +606,7 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 
 	sic.src_mtu = src_dev->mtu;
 	sic.dest_mtu = dest_dev->mtu;
-	sic.mark = skb->mark;
+
 	if (likely(is_v4)) {
 		sfe_ipv4_create_rule(&sic);
 	} else {
@@ -828,11 +815,7 @@ static void sfe_cm_sync_rule(struct sfe_connection_sync *sis)
 	 */
 	if (!test_bit(IPS_FIXED_TIMEOUT_BIT, &ct->status)) {
 		spin_lock_bh(&ct->lock);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)) 
-		ct->timeout += sis->delta_jiffies;
-#else
 		ct->timeout.expires += sis->delta_jiffies;
-#endif
 		spin_unlock_bh(&ct->lock);
 	}
 
@@ -869,6 +852,7 @@ static void sfe_cm_sync_rule(struct sfe_connection_sync *sis)
 		}
 		spin_unlock_bh(&ct->lock);
 		break;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
 	case IPPROTO_UDP:
 		/*
 		 * In Linux connection track, UDP flow has two timeout values:
@@ -895,15 +879,12 @@ static void sfe_cm_sync_rule(struct sfe_connection_sync *sis)
 				timeouts = nf_ct_timeout_lookup(&init_net, ct, l4proto);
 
 				spin_lock_bh(&ct->lock);
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
-				ct->timeout = nfct_time_stamp + timeouts[UDP_CT_REPLIED];
-#else
 				ct->timeout.expires = jiffies + timeouts[UDP_CT_REPLIED];
-#endif
 				spin_unlock_bh(&ct->lock);
 			}
 		}
 		break;
+#endif /*KERNEL_VERSION(3, 4, 0)*/
 	}
 
 	/*
@@ -915,7 +896,7 @@ static void sfe_cm_sync_rule(struct sfe_connection_sync *sis)
 /*
  * sfe_cm_device_event()
  */
-static int sfe_cm_device_event(struct notifier_block *this, unsigned long event, void *ptr)
+int sfe_cm_device_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct net_device *dev = SFE_DEV_EVENT_PTR(ptr);
 
@@ -978,79 +959,10 @@ static ssize_t sfe_cm_get_exceptions(struct device *dev,
 }
 
 /*
- * sfe_cm_get_stop
- * 	dump stop
- */
-static ssize_t sfe_cm_get_stop(struct device *dev,
-                               struct device_attribute *attr,
-                               char *buf)
-{
-	int (*fast_recv)(struct sk_buff *skb);
-	rcu_read_lock();
-	fast_recv = rcu_dereference(fast_nat_recv);
-	rcu_read_unlock();
-	return snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", fast_recv ? 0 : 1);
-}
-
-static ssize_t sfe_cm_set_stop(struct device *dev,
-                               struct device_attribute *attr,
-                               const char *buf, size_t count)
-{
-	int ret;
-	u32 num;
-	int (*fast_recv)(struct sk_buff *skb);
-
-	ret = kstrtou32(buf, 0, &num);
-	if (ret)
-		return ret;
-
-	/*
-	 * Hook/Unhook the receive path in the network stack.
-	 */
-	if (num) {
-		RCU_INIT_POINTER(fast_nat_recv, NULL);
-	} else {
-		rcu_read_lock();
-		fast_recv = rcu_dereference(fast_nat_recv);
-		rcu_read_unlock();
-		if (!fast_recv) {
-			BUG_ON(fast_nat_recv);
-			RCU_INIT_POINTER(fast_nat_recv, sfe_cm_recv);
-		}
-	}
-
-	DEBUG_TRACE("sfe_cm_stop = %d\n", num);
-	return count;
-}
-
-/*
- * sfe_cm_get_defunct_all
- * 	dump state of SFE
- */
-static ssize_t sfe_cm_get_defunct_all(struct device *dev,
-                                      struct device_attribute *attr,
-                                      char *buf)
-{
-	return snprintf(buf, (ssize_t)PAGE_SIZE, "%d\n", 0);
-}
-
-static ssize_t sfe_cm_set_defunct_all(struct device *dev,
-                                      struct device_attribute *attr,
-                                      const char *buf, size_t count)
-{
-	sfe_ipv4_destroy_all_rules_for_dev(NULL);
-	sfe_ipv6_destroy_all_rules_for_dev(NULL);
-	return count;
-}
-
-/*
  * sysfs attributes.
  */
-static const struct device_attribute sfe_attrs[] = {
-	__ATTR(exceptions, S_IRUGO, sfe_cm_get_exceptions, NULL),
-	__ATTR(stop, S_IWUSR | S_IRUGO, sfe_cm_get_stop, sfe_cm_set_stop),
-	__ATTR(defunct_all, S_IWUSR | S_IRUGO, sfe_cm_get_defunct_all, sfe_cm_set_defunct_all),
-};
+static const struct device_attribute sfe_cm_exceptions_attr =
+	__ATTR(exceptions, S_IRUGO, sfe_cm_get_exceptions, NULL);
 
 /*
  * sfe_cm_init()
@@ -1059,7 +971,6 @@ static int __init sfe_cm_init(void)
 {
 	struct sfe_cm *sc = &__sc;
 	int result = -1;
-	size_t i, j;
 
 	DEBUG_INFO("SFE CM init\n");
 
@@ -1072,13 +983,13 @@ static int __init sfe_cm_init(void)
 		goto exit1;
 	}
 
-	for (i = 0; i < ARRAY_SIZE(sfe_attrs); i++) {
-		result = sysfs_create_file(sc->sys_sfe_cm, &sfe_attrs[i].attr);
-		if (result) {
-			DEBUG_ERROR("failed to register %s : %d\n",
-				    sfe_attrs[i].attr.name, result);
-			goto exit2;
-		}
+	/*
+	 * Create sys/sfe_cm/exceptions
+	 */
+	result = sysfs_create_file(sc->sys_sfe_cm, &sfe_cm_exceptions_attr.attr);
+	if (result) {
+		DEBUG_ERROR("failed to register exceptions file: %d\n", result);
+		goto exit2;
 	}
 
 	sc->dev_notifier.notifier_call = sfe_cm_device_event;
@@ -1101,13 +1012,12 @@ static int __init sfe_cm_init(void)
 		goto exit3;
 	}
 
-#ifdef CONFIG_NF_CONNTRACK_EVENTS
 	/*
 	 * Register a notifier hook to get fast notifications of expired connections.
 	 * Note: In CONFIG_NF_CONNTRACK_CHAIN_EVENTS enabled case, nf_conntrack_register_notifier()
 	 * function always returns 0.
 	 */
-
+#ifdef CONFIG_NF_CONNTRACK_EVENTS
 #ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
 	(void)nf_conntrack_register_notifier(&init_net, &sfe_cm_conntrack_notifier);
 #else
@@ -1120,6 +1030,12 @@ static int __init sfe_cm_init(void)
 #endif
 
 	spin_lock_init(&sc->lock);
+
+	/*
+	 * Hook the receive path in the network stack.
+	 */
+	BUG_ON(athrs_fast_nat_recv);
+	RCU_INIT_POINTER(athrs_fast_nat_recv, sfe_cm_recv);
 
 	/*
 	 * Hook the shortcut sync callback.
@@ -1139,9 +1055,6 @@ exit3:
 	unregister_inetaddr_notifier(&sc->inet_notifier);
 	unregister_netdevice_notifier(&sc->dev_notifier);
 exit2:
-	for (j = 0; j < i; j++) {
-		sysfs_remove_file(sc->sys_sfe_cm, &sfe_attrs[j].attr);
-	}
 	kobject_put(sc->sys_sfe_cm);
 
 exit1:
@@ -1166,7 +1079,7 @@ static void __exit sfe_cm_exit(void)
 	/*
 	 * Unregister our receive callback.
 	 */
-	RCU_INIT_POINTER(fast_nat_recv, NULL);
+	RCU_INIT_POINTER(athrs_fast_nat_recv, NULL);
 
 	/*
 	 * Wait for all callbacks to complete.
