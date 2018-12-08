@@ -1,0 +1,1546 @@
+--- a/net/bridge/br_fdb.c	2017-04-08 15:53:53.000000000 +0800
++++ b/net/bridge/br_fdb.c	2018-11-26 16:33:55.200400228 +0800
+@@ -38,6 +38,20 @@
+ 
+ static u32 fdb_salt __read_mostly;
+ 
++ATOMIC_NOTIFIER_HEAD(br_fdb_notifier_list);
++
++void br_fdb_register_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_register(&br_fdb_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_register_notify);
++
++void br_fdb_unregister_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_unregister(&br_fdb_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_unregister_notify);
++
+ int __init br_fdb_init(void)
+ {
+ 	br_fdb_cache = kmem_cache_create("bridge_fdb_cache",
+@@ -289,12 +303,27 @@
+ 	spin_unlock_bh(&br->hash_lock);
+ }
+ 
++ATOMIC_NOTIFIER_HEAD(br_fdb_update_notifier_list);
++
++void br_fdb_update_register_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_register(&br_fdb_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_update_register_notify);
++
++void br_fdb_update_unregister_notify(struct notifier_block *nb)
++{
++	atomic_notifier_chain_unregister(&br_fdb_update_notifier_list, nb);
++}
++EXPORT_SYMBOL_GPL(br_fdb_update_unregister_notify);
++
+ void br_fdb_cleanup(unsigned long _data)
+ {
+ 	struct net_bridge *br = (struct net_bridge *)_data;
+ 	unsigned long delay = hold_time(br);
+ 	unsigned long next_timer = jiffies + br->ageing_time;
+ 	int i;
++	u8 mac_addr[6];
+ 
+ 	spin_lock(&br->hash_lock);
+ 	for (i = 0; i < BR_HASH_SIZE; i++) {
+@@ -308,10 +337,15 @@
+ 			if (f->added_by_external_learn)
+ 				continue;
+ 			this_timer = f->updated + delay;
+-			if (time_before_eq(this_timer, jiffies))
++			if (time_before_eq(this_timer, jiffies)) {
++				ether_addr_copy(mac_addr, f->addr.addr);
+ 				fdb_delete(br, f);
+-			else if (time_before(this_timer, next_timer))
++				atomic_notifier_call_chain(
++					&br_fdb_update_notifier_list, 0,
++					(void *)mac_addr);
++			} else if (time_before(this_timer, next_timer)) {
+ 				next_timer = this_timer;
++			}
+ 		}
+ 	}
+ 	spin_unlock(&br->hash_lock);
+@@ -389,6 +423,7 @@
+ 
+ 	return NULL;
+ }
++EXPORT_SYMBOL_GPL(__br_fdb_get);
+ 
+ #if IS_ENABLED(CONFIG_ATM_LANE)
+ /* Interface used by ATM LANE hook to test
+@@ -590,6 +625,10 @@
+ 			if (unlikely(source != fdb->dst)) {
+ 				fdb->dst = source;
+ 				fdb_modified = true;
++
++				atomic_notifier_call_chain(
++					&br_fdb_update_notifier_list,
++					0, (void *)addr);
+ 			}
+ 			fdb->updated = jiffies;
+ 			if (unlikely(added_by_user))
+@@ -614,8 +653,46 @@
+ 	}
+ }
+ 
++/* Refresh FDB entries for bridge packets being forwarded by offload engines */
++void br_refresh_fdb_entry(struct net_device *dev, const char *addr)
++{
++	struct net_bridge_port *p = br_port_get_rcu(dev);
++
++	if (!p || p->state == BR_STATE_DISABLED)
++		return;
++
++	if (!is_valid_ether_addr(addr)) {
++		pr_info("bridge: Attempt to refresh with invalid ether address %pM\n",
++			addr);
++		return;
++	}
++
++	rcu_read_lock();
++	br_fdb_update(p->br, p, addr, 0, true);
++	rcu_read_unlock();
++}
++EXPORT_SYMBOL_GPL(br_refresh_fdb_entry);
++
++/* Look up the MAC address in the device's bridge fdb table */
++struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
++					      const char *addr, __u16 vid)
++{
++	struct net_bridge_port *p = br_port_get_rcu(dev);
++	struct net_bridge_fdb_entry *fdb;
++
++	if (!p || p->state == BR_STATE_DISABLED)
++		return NULL;
++
++	rcu_read_lock();
++	fdb = fdb_find_rcu(&p->br->hash[br_mac_hash(addr, vid)], addr, vid);
++	rcu_read_unlock();
++
++	return fdb;
++}
++EXPORT_SYMBOL_GPL(br_fdb_has_entry);
++
+ static int fdb_to_nud(const struct net_bridge *br,
+-		      const struct net_bridge_fdb_entry *fdb)
++			const struct net_bridge_fdb_entry *fdb)
+ {
+ 	if (fdb->is_local)
+ 		return NUD_PERMANENT;
+@@ -687,6 +764,23 @@
+ 	struct sk_buff *skb;
+ 	int err = -ENOBUFS;
+ 
++	if (fdb->dst) {
++		int event;
++		struct br_fdb_event fdb_event;
++
++		if (type == RTM_NEWNEIGH)
++			event = BR_FDB_EVENT_ADD;
++		else
++			event = BR_FDB_EVENT_DEL;
++
++		fdb_event.dev = fdb->dst->dev;
++		ether_addr_copy(fdb_event.addr, fdb->addr.addr);
++		fdb_event.is_local = fdb->is_local;
++		atomic_notifier_call_chain(&br_fdb_notifier_list,
++					   event,
++					   (void *)&fdb_event);
++	}
++
+ 	skb = nlmsg_new(fdb_nlmsg_size(), GFP_ATOMIC);
+ 	if (skb == NULL)
+ 		goto errout;
+@@ -698,6 +792,7 @@
+ 		kfree_skb(skb);
+ 		goto errout;
+ 	}
++	__br_notify(RTNLGRP_NEIGH, type, fdb);
+ 	rtnl_notify(skb, net, 0, RTNLGRP_NEIGH, NULL, GFP_ATOMIC);
+ 	return;
+ errout:
+--- a/net/bridge/br_if.c	2017-04-08 15:53:53.000000000 +0800
++++ b/net/bridge/br_if.c	2018-11-26 16:33:55.200400228 +0800
+@@ -1,4 +1,10 @@
+ /*
++ **************************************************************************
++ * Copyright (c) 2015-2016, The Linux Foundation. All rights reserved.
++ **************************************************************************
++ */
++
++/*
+  *	Userspace interface
+  *	Linux ethernet bridge
+  *
+@@ -28,6 +34,10 @@
+ 
+ #include "br_private.h"
+ 
++/* Hook for external forwarding logic */
++br_port_dev_get_hook_t __rcu *br_port_dev_get_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_port_dev_get_hook);
++
+ /*
+  * Determine initial path cost based on speed.
+  * using recommendations from 802.1d standard
+@@ -533,6 +543,7 @@
+ 	dev_set_mtu(br->dev, br_min_mtu(br));
+ 
+ 	kobject_uevent(&p->kobj, KOBJ_ADD);
++	call_netdevice_notifiers(NETDEV_BR_JOIN, dev);
+ 
+ 	return 0;
+ 
+@@ -570,6 +581,8 @@
+ 	if (!p || p->br != br)
+ 		return -EINVAL;
+ 
++	call_netdevice_notifiers(NETDEV_BR_LEAVE, dev);
++
+ 	/* Since more than one interface can be attached to a bridge,
+ 	 * there still maybe an alternate path for netconsole to use;
+ 	 * therefore there is no reason for a NETDEV_RELEASE event.
+@@ -598,6 +611,65 @@
+ 		nbp_update_port_count(br);
+ }
+ 
++/* br_port_dev_get()
++ *      If a skb is provided, and the br_port_dev_get_hook_t hook exists,
++ *      use that to try and determine the egress port for that skb.
++ *      If not, or no egress port could be determined, use the given addr
++ *      to identify the port to which it is reachable,
++ *	returing a reference to the net device associated with that port.
++ *
++ * NOTE: Return NULL if given dev is not a bridge or the mac has no
++ * associated port.
++ */
++struct net_device *br_port_dev_get(struct net_device *dev, unsigned char *addr,
++				   struct sk_buff *skb,
++				   unsigned int cookie)
++{
++	struct net_bridge_fdb_entry *fdbe;
++	struct net_bridge *br;
++	struct net_device *netdev = NULL;
++
++	/* Is this a bridge? */
++	if (!(dev->priv_flags & IFF_EBRIDGE))
++		return NULL;
++
++	rcu_read_lock();
++
++	/* If the hook exists and the skb isn't NULL, try and get the port */
++	if (skb) {
++		br_port_dev_get_hook_t *port_dev_get_hook;
++
++		port_dev_get_hook = rcu_dereference(br_port_dev_get_hook);
++		if (port_dev_get_hook) {
++			struct net_bridge_port *pdst =
++				__br_get(port_dev_get_hook, NULL, dev, skb,
++					 addr, cookie);
++			if (pdst) {
++				dev_hold(pdst->dev);
++				netdev = pdst->dev;
++				goto out;
++			}
++		}
++	}
++
++	/* Either there is no hook, or can't
++	 * determine the port to use - fall back to using FDB
++	 */
++
++	br = netdev_priv(dev);
++
++	/* Lookup the fdb entry and get reference to the port dev */
++	fdbe = __br_fdb_get(br, addr, 0);
++	if (fdbe && fdbe->dst) {
++		netdev = fdbe->dst->dev; /* port device */
++		dev_hold(netdev);
++	}
++out:
++	rcu_read_unlock();
++	return netdev;
++}
++EXPORT_SYMBOL_GPL(br_port_dev_get);
++
+ /* Update bridge statistics for bridge packets processed by offload engines */
+ void br_dev_update_stats(struct net_device *dev,
+ 			 struct rtnl_link_stats64 *nlstats)
+--- a/drivers/net/bonding/bond_main.c	2017-04-08 15:53:53.000000000 +0800
++++ b/drivers/net/bonding/bond_main.c	2018-11-26 17:15:52.056400228 +0800
+@@ -79,8 +79,11 @@
+ #include <net/flow_dissector.h>
+ #include <net/switchdev.h>
+ #include <net/bonding.h>
++#include <net/bond_l2da.h>
+ #include <net/bond_3ad.h>
+ #include <net/bond_alb.h>
++#include "bond_genl.h"
++
+ 
+ #include "bonding_priv.h"
+ 
+@@ -134,10 +137,7 @@
+ MODULE_PARM_DESC(use_carrier, "Use netif_carrier_ok (vs MII ioctls) in miimon; "
+ 			      "0 for off, 1 for on (default)");
+ module_param(mode, charp, 0);
+-MODULE_PARM_DESC(mode, "Mode of operation; 0 for balance-rr, "
+-		       "1 for active-backup, 2 for balance-xor, "
+-		       "3 for broadcast, 4 for 802.3ad, 5 for balance-tlb, "
+-		       "6 for balance-alb");
++MODULE_PARM_DESC(mode, "Mode of operation; 0 for balance-rr, 1 for active-backup, 2 for balance-xor, 3 for broadcast, 4 for 802.3ad, 5 for balance-tlb, 6 for balance-alb, 7 for l2da");
+ module_param(primary, charp, 0);
+ MODULE_PARM_DESC(primary, "Primary network device to use");
+ module_param(primary_reselect, charp, 0);
+@@ -206,6 +206,7 @@
+ static int bond_mode	= BOND_MODE_ROUNDROBIN;
+ static int xmit_hashtype = BOND_XMIT_POLICY_LAYER2;
+ static int lacp_fast;
++static unsigned long bond_id_mask = 0xFFFFFFF0;
+ 
+ /*-------------------------- Forward declarations ---------------------------*/
+ 
+@@ -230,14 +231,29 @@
+ 		[BOND_MODE_8023AD] = "IEEE 802.3ad Dynamic link aggregation",
+ 		[BOND_MODE_TLB] = "transmit load balancing",
+ 		[BOND_MODE_ALB] = "adaptive load balancing",
++		[BOND_MODE_L2DA] = "layer 2 destination address map",
+ 	};
+ 
+-	if (mode < BOND_MODE_ROUNDROBIN || mode > BOND_MODE_ALB)
++	if (mode < BOND_MODE_ROUNDROBIN || mode > BOND_MODE_L2DA)
+ 		return "unknown";
+ 
+ 	return names[mode];
+ }
+ 
++int bond_get_id(struct net_device *bond_dev)
++{
++	struct bonding *bond;
++
++	if (!((bond_dev->priv_flags & IFF_BONDING) &&
++	      (bond_dev->flags & IFF_MASTER)))
++		return -EINVAL;
++
++	bond = netdev_priv(bond_dev);
++
++	return bond->id;
++}
++EXPORT_SYMBOL(bond_get_id);
++
+ /*---------------------------------- VLAN -----------------------------------*/
+ 
+ /**
+@@ -278,8 +294,7 @@
+  * worse, and if it works for regular VLAN usage it will work here too.
+ */
+ 
+-/**
+- * bond_vlan_rx_add_vid - Propagates adding an id to slaves
++/* bond_vlan_rx_add_vid - Propagates adding an id to slaves
+  * @bond_dev: bonding net device that got called
+  * @vid: vlan id being added
+  */
+@@ -838,6 +853,21 @@
+ 			if (BOND_MODE(bond) == BOND_MODE_8023AD)
+ 				bond_3ad_handle_link_change(new_active, BOND_LINK_UP);
+ 
++			if (bond->params.mode == BOND_MODE_XOR) {
++				struct bond_cb *lag_cb_main;
++
++				rcu_read_lock();
++				lag_cb_main = rcu_dereference(bond_cb);
++				if (lag_cb_main &&
++				    lag_cb_main->bond_cb_link_up) {
++					struct net_device *dev;
++
++					dev = new_active->dev;
++					lag_cb_main->bond_cb_link_up(dev);
++				}
++				rcu_read_unlock();
++			}
++
+ 			if (bond_is_lb(bond))
+ 				bond_alb_handle_link_change(bond, new_active, BOND_LINK_UP);
+ 		} else {
+@@ -1184,6 +1214,12 @@
+ 		return RX_HANDLER_EXACT;
+ 	}
+ 
++	if (bond_is_l2da(bond) &&
++	    !bond_l2da_handle_rx_frame(bond, slave, skb)) {
++		consume_skb(skb);
++		return RX_HANDLER_CONSUMED;
++	}
++
+ 	skb->dev = bond->dev;
+ 
+ 	if (BOND_MODE(bond) == BOND_MODE_ALB &&
+@@ -1298,8 +1334,9 @@
+ 	const struct net_device_ops *slave_ops = slave_dev->netdev_ops;
+ 	struct slave *new_slave = NULL, *prev_slave;
+ 	struct sockaddr addr;
++	struct bond_cb *lag_cb_main;
+ 	int link_reporting;
+-	int res = 0, i;
++	int res = 0, i, mac_stolen = 0, same_addr;
+ 
+ 	if (!bond->params.use_carrier &&
+ 	    slave_dev->ethtool_ops->get_link == NULL &&
+@@ -1414,8 +1451,10 @@
+ 	 * address to be the same as the slave's.
+ 	 */
+ 	if (!bond_has_slaves(bond) &&
+-	    bond->dev->addr_assign_type == NET_ADDR_RANDOM)
++	    bond->dev->addr_assign_type == NET_ADDR_RANDOM) {
+ 		bond_set_dev_addr(bond->dev, slave_dev);
++		mac_stolen = 1;
++	}
+ 
+ 	new_slave = bond_alloc_slave(bond);
+ 	if (!new_slave) {
+@@ -1443,17 +1482,24 @@
+ 	 * set it to the master's address
+ 	 */
+ 	ether_addr_copy(new_slave->perm_hwaddr, slave_dev->dev_addr);
++	same_addr = ether_addr_equal(bond_dev->dev_addr, slave_dev->dev_addr);
+ 
+-	if (!bond->params.fail_over_mac ||
+-	    BOND_MODE(bond) != BOND_MODE_ACTIVEBACKUP) {
+-		/* Set slave to master's mac address.  The application already
++	if ((!bond->params.fail_over_mac ||
++	     BOND_MODE(bond) != BOND_MODE_ACTIVEBACKUP) &&
++	    /* In l2da mode, skip for first slave and skip if
++	     * slave's address is already same as bond's address.
++	     */
++	    !(bond_is_l2da(bond) &&
++	      (mac_stolen || same_addr || bond->l2da_info.multimac))) {
++		/* Set slave to master's mac address. The application already
+ 		 * set the master's mac address to that of the first slave
+ 		 */
+ 		memcpy(addr.sa_data, bond_dev->dev_addr, bond_dev->addr_len);
+ 		addr.sa_family = slave_dev->type;
+ 		res = dev_set_mac_address(slave_dev, &addr);
+ 		if (res) {
+-			netdev_dbg(bond_dev, "Error %d calling set_mac_address\n", res);
++			netdev_dbg(bond_dev,
++				   "Error %d calling set_mac_address\n", res);
+ 			goto err_restore_mtu;
+ 		}
+ 	}
+@@ -1587,6 +1633,10 @@
+ 		bond_set_active_slave(new_slave);
+ 		bond_set_slave_inactive_flags(new_slave, BOND_SLAVE_NOTIFY_NOW);
+ 		break;
++	case BOND_MODE_L2DA:
++		bond_set_slave_active_flags(new_slave, BOND_SLAVE_NOTIFY_NOW);
++		bond_l2da_bind_slave(bond, new_slave);
++		break;
+ 	default:
+ 		netdev_dbg(bond_dev, "This slave is always active in trunk mode\n");
+ 
+@@ -1683,6 +1733,12 @@
+ 	if (bond_mode_uses_xmit_hash(bond))
+ 		bond_update_slave_arr(bond, NULL);
+ 
++	rcu_read_lock();
++	lag_cb_main = rcu_dereference(bond_cb);
++	if (lag_cb_main && lag_cb_main->bond_cb_enslave)
++		lag_cb_main->bond_cb_enslave(slave_dev);
++
++	rcu_read_unlock();
+ 	netdev_info(bond_dev, "Enslaving %s as %s interface with %s link\n",
+ 		    slave_dev->name,
+ 		    bond_is_active_slave(new_slave) ? "an active" : "a backup",
+@@ -1753,6 +1809,13 @@
+ 		}
+ 	}
+ 
++	rcu_read_lock();
++	lag_cb_main = rcu_dereference(bond_cb);
++	if (lag_cb_main && lag_cb_main->bond_cb_enslave)
++		lag_cb_main->bond_cb_enslave(slave_dev);
++
++	rcu_read_unlock();
++
+ 	return res;
+ }
+ 
+@@ -1774,6 +1837,7 @@
+ 	struct bonding *bond = netdev_priv(bond_dev);
+ 	struct slave *slave, *oldcurrent;
+ 	struct sockaddr addr;
++	struct bond_cb *lag_cb_main;
+ 	int old_flags = bond_dev->flags;
+ 	netdev_features_t old_features = bond_dev->features;
+ 
+@@ -1796,6 +1860,13 @@
+ 		return -EINVAL;
+ 	}
+ 
++	rcu_read_lock();
++	lag_cb_main = rcu_dereference(bond_cb);
++	if (lag_cb_main && lag_cb_main->bond_cb_release)
++		lag_cb_main->bond_cb_release(slave_dev);
++
++	rcu_read_unlock();
++
+ 	bond_sysfs_slave_del(slave);
+ 
+ 	/* recompute stats just before removing the slave */
+@@ -1843,7 +1914,8 @@
+ 		 * but before a new active slave is selected.
+ 		 */
+ 		bond_alb_deinit_slave(bond, slave);
+-	}
++	} else if (bond_is_l2da(bond))
++		bond_l2da_unbind_slave(bond, slave);
+ 
+ 	if (all) {
+ 		RCU_INIT_POINTER(bond->curr_active_slave, NULL);
+@@ -2075,6 +2147,8 @@
+ {
+ 	struct list_head *iter;
+ 	struct slave *slave, *primary;
++	struct net_device *slave_dev = NULL;
++	struct bond_cb *lag_cb_main;
+ 
+ 	bond_for_each_slave(bond, slave, iter) {
+ 		switch (slave->new_link) {
+@@ -2110,9 +2184,16 @@
+ 				bond_alb_handle_link_change(bond, slave,
+ 							    BOND_LINK_UP);
+ 
++			if ((bond->params.mode == BOND_MODE_XOR) &&
++			    (!slave_dev))
++				slave_dev = slave->dev;
++
+ 			if (BOND_MODE(bond) == BOND_MODE_XOR)
+ 				bond_update_slave_arr(bond, NULL);
+ 
++			if (bond_is_l2da(bond))
++				bond_l2da_handle_link_change(bond, slave);
++
+ 			if (!bond->curr_active_slave || slave == primary)
+ 				goto do_failover;
+ 
+@@ -2140,6 +2221,9 @@
+ 				bond_alb_handle_link_change(bond, slave,
+ 							    BOND_LINK_DOWN);
+ 
++			if (bond_is_l2da(bond))
++				bond_l2da_handle_link_change(bond, slave);
++
+ 			if (BOND_MODE(bond) == BOND_MODE_XOR)
+ 				bond_update_slave_arr(bond, NULL);
+ 
+@@ -2163,6 +2247,15 @@
+ 	}
+ 
+ 	bond_set_carrier(bond);
++
++	rcu_read_lock();
++	lag_cb_main = rcu_dereference(bond_cb);
++
++	if (slave_dev && lag_cb_main && lag_cb_main->bond_cb_link_up)
++		lag_cb_main->bond_cb_link_up(slave_dev);
++
++	rcu_read_unlock();
++
+ }
+ 
+ /* bond_mii_monitor
+@@ -3092,11 +3185,45 @@
+ 
+ 	ep = skb_header_pointer(skb, 0, sizeof(hdr_tmp), &hdr_tmp);
+ 	if (ep)
+-		return ep->h_dest[5] ^ ep->h_source[5] ^ ep->h_proto;
++		return ep->h_dest[5] ^ ep->h_source[5];
+ 	return 0;
+ }
+ 
+ /* Extract the appropriate headers based on bond's xmit policy */
++static bool bond_flow_dissect_without_skb(struct bonding *bond,
++					  u8 *src_mac, u8 *dst_mac,
++					  void *psrc, void *pdst,
++					  u16 protocol, __be16 *layer4hdr,
++					  struct flow_keys *fk)
++{
++	u32 *src = NULL;
++	u32 *dst = NULL;
++
++	fk->ports.ports = 0;
++	src = (uint32_t *)psrc;
++	dst = (uint32_t *)pdst;
++
++	if (protocol == htons(ETH_P_IP)) {
++		/* V4 addresses and address type*/
++		fk->addrs.v4addrs.src = src[0];
++		fk->addrs.v4addrs.dst = dst[0];
++		fk->control.addr_type = FLOW_DISSECTOR_KEY_IPV4_ADDRS;
++	} else if (protocol == htons(ETH_P_IPV6)) {
++		/* V6 addresses and address type*/
++		memcpy(&fk->addrs.v6addrs.src, src, sizeof(struct in6_addr));
++		memcpy(&fk->addrs.v6addrs.dst, dst, sizeof(struct in6_addr));
++		fk->control.addr_type = FLOW_DISSECTOR_KEY_IPV6_ADDRS;
++	} else {
++		return false;
++	}
++	if ((bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER34) &&
++	    (layer4hdr))
++		fk->ports.ports = *layer4hdr;
++
++	return true;
++}
++
++/* Extract the appropriate headers based on bond's xmit policy */
+ static bool bond_flow_dissect(struct bonding *bond, struct sk_buff *skb,
+ 			      struct flow_keys *fk)
+ {
+@@ -3757,6 +3884,179 @@
+ 	return NETDEV_TX_OK;
+ }
+ 
++/* bond_xmit_hash_without_skb - Applies load balancing algorithm for a packet,
++ * to calculate hash for a given set of L2/L3 addresses. Does not
++ * calculate egress interface.
++ */
++uint32_t bond_xmit_hash_without_skb(u8 *src_mac, u8 *dst_mac,
++				    void *psrc, void *pdst, u16 protocol,
++				    struct net_device *bond_dev,
++				    __be16 *layer4hdr)
++{
++	struct bonding *bond = netdev_priv(bond_dev);
++	struct flow_keys flow;
++	u32 hash = 0;
++
++	if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER2 ||
++	    !bond_flow_dissect_without_skb(bond, src_mac, dst_mac, psrc,
++					   pdst, protocol, layer4hdr, &flow))
++		return (dst_mac[5] ^ src_mac[5]);
++
++	if (bond->params.xmit_policy == BOND_XMIT_POLICY_LAYER23)
++		hash = dst_mac[5] ^ src_mac[5];
++	else if (layer4hdr)
++		hash = (__force u32)flow.ports.ports;
++
++	hash ^= (__force u32)flow_get_u32_dst(&flow) ^
++		(__force u32)flow_get_u32_src(&flow);
++	hash ^= (hash >> 16);
++	hash ^= (hash >> 8);
++
++	return hash;
++}
++
++/* bond_xor_get_tx_dev - Calculate egress interface for a given packet for a LAG
++ * that is configured in balance-xor mode
++ * @skb: pointer to skb to be egressed
++ * @src_mac: pointer to source L2 address
++ * @dst_mac: pointer to destination L2 address
++ * @src: pointer to source L3 address in network order
++ * @dst: pointer to destination L3 address in network order
++ * @protocol: L3 protocol
++ * @bond_dev: pointer to bond master device
++ *
++ * If @skb is NULL, bond_xmit_hash_without_skb is used to calculate hash using
++ * L2/L3 addresses.
++ *
++ * Returns: Either valid slave device, or NULL otherwise
++ */
++static struct net_device *bond_xor_get_tx_dev(struct sk_buff *skb,
++					      u8 *src_mac, u8 *dst_mac,
++					      void *src, void *dst,
++					      u16 protocol,
++					      struct net_device *bond_dev,
++					      __be16 *layer4hdr)
++{
++	struct bonding *bond = netdev_priv(bond_dev);
++	int slave_cnt = ACCESS_ONCE(bond->slave_cnt);
++	int slave_id = 0, i = 0;
++	u32 hash;
++	struct list_head *iter;
++	struct slave *slave;
++
++	if (slave_cnt == 0) {
++		pr_debug("%s: Error: No slave is attached to the interface\n",
++			 bond_dev->name);
++		return NULL;
++	}
++
++	if (skb) {
++		hash = bond_xmit_hash(bond, skb);
++		slave_id = hash % slave_cnt;
++	} else {
++		if (bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER23 &&
++		    bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER2	&&
++		    bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER34) {
++			pr_debug("%s: Error: Unsupported hash policy for balance-XOR fast path\n",
++				 bond_dev->name);
++			return NULL;
++		}
++
++		hash = bond_xmit_hash_without_skb(src_mac, dst_mac, src,
++						  dst, protocol, bond_dev,
++						  layer4hdr);
++		slave_id = hash % slave_cnt;
++	}
++
++	i = slave_id;
++
++	/* Here we start from the slave with slave_id */
++	bond_for_each_slave_rcu(bond, slave, iter) {
++		if (--i < 0) {
++			if (bond_slave_can_tx(slave))
++				return slave->dev;
++		}
++	}
++
++	/* Here we start from the first slave up to slave_id */
++	i = slave_id;
++	bond_for_each_slave_rcu(bond, slave, iter) {
++		if (--i < 0)
++			break;
++		if (bond_slave_can_tx(slave))
++			return slave->dev;
++	}
++
++	return NULL;
++}
++
++/* bond_get_tx_dev - Calculate egress interface for a given packet.
++ *
++ * Supports 802.3AD and balance-xor modes
++ *
++ * @skb: pointer to skb to be egressed, if valid
++ * @src_mac: pointer to source L2 address
++ * @dst_mac: pointer to destination L2 address
++ * @src: pointer to source L3 address in network order
++ * @dst: pointer to destination L3 address in network order
++ * @protocol: L3 protocol id from L2 header
++ * @bond_dev: pointer to bond master device
++ *
++ * Returns: Either valid slave device, or NULL for un-supported LAG modes
++ */
++struct net_device *bond_get_tx_dev(struct sk_buff *skb, uint8_t *src_mac,
++				   u8 *dst_mac, void *src,
++				   void *dst, u16 protocol,
++				   struct net_device *bond_dev,
++				   __be16 *layer4hdr)
++{
++	struct bonding *bond = netdev_priv(bond_dev);
++
++	if (!bond)
++		return NULL;
++
++	switch (bond->params.mode) {
++	case BOND_MODE_XOR:
++		return bond_xor_get_tx_dev(skb, src_mac, dst_mac,
++					   src, dst, protocol,
++					   bond_dev, layer4hdr);
++	case BOND_MODE_8023AD:
++		return bond_3ad_get_tx_dev(skb, src_mac, dst_mac,
++					   src, dst, protocol,
++					   bond_dev, layer4hdr);
++	case BOND_MODE_L2DA:
++		return bond_l2da_get_tx_dev(dst_mac, bond_dev);
++	default:
++		return NULL;
++	}
++}
++EXPORT_SYMBOL(bond_get_tx_dev);
++
++/* In bond_xmit_xor() , we determine the output device by using a pre-
++ * determined xmit_hash_policy(), If the selected device is not enabled,
++ * find the next active slave.
++ */
++static int bond_xmit_xor(struct sk_buff *skb, struct net_device *dev)
++{
++	struct bonding *bond = netdev_priv(dev);
++	struct net_device *outdev;
++
++	outdev = bond_xor_get_tx_dev(skb, NULL, NULL, NULL,
++				     NULL, 0, dev, NULL);
++
++	if (!outdev)
++		goto out;
++
++	bond_dev_queue_xmit(bond, skb, outdev);
++
++	goto final;
++out:
++	/* no suitable interface, frame not sent */
++	dev_kfree_skb(skb);
++final:
++	return NETDEV_TX_OK;
++}
++
+ /* Use this to update slave_array when (a) it's not appropriate to update
+  * slave_array right away (note that update_slave_array() may sleep)
+  * and / or (b) RTNL is not held.
+@@ -3884,19 +4184,21 @@
+ static int bond_3ad_xor_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+ 	struct bonding *bond = netdev_priv(dev);
+-	struct slave *slave;
+-	struct bond_up_slave *slaves;
+-	unsigned int count;
++	struct net_device *outdev = NULL;
+ 
+-	slaves = rcu_dereference(bond->slave_arr);
+-	count = slaves ? ACCESS_ONCE(slaves->count) : 0;
+-	if (likely(count)) {
+-		slave = slaves->arr[bond_xmit_hash(bond, skb) % count];
+-		bond_dev_queue_xmit(bond, skb, slave->dev);
+-	} else {
+-		bond_tx_drop(dev, skb);
+-	}
++	outdev = bond_3ad_get_tx_dev(skb, NULL, NULL, NULL,
++				     NULL, 0, dev, NULL);
++
++	if (!outdev)
++		goto out;
++
++	bond_dev_queue_xmit(bond, skb, outdev);
++	goto final;
+ 
++out:
++	dev_kfree_skb(skb);
++
++final:
+ 	return NETDEV_TX_OK;
+ }
+ 
+@@ -3992,8 +4294,9 @@
+ 		return bond_xmit_roundrobin(skb, dev);
+ 	case BOND_MODE_ACTIVEBACKUP:
+ 		return bond_xmit_activebackup(skb, dev);
+-	case BOND_MODE_8023AD:
+ 	case BOND_MODE_XOR:
++		return bond_xmit_xor(skb, dev);
++	case BOND_MODE_8023AD:
+ 		return bond_3ad_xor_xmit(skb, dev);
+ 	case BOND_MODE_BROADCAST:
+ 		return bond_xmit_broadcast(skb, dev);
+@@ -4001,6 +4304,8 @@
+ 		return bond_alb_xmit(skb, dev);
+ 	case BOND_MODE_TLB:
+ 		return bond_tlb_xmit(skb, dev);
++	case BOND_MODE_L2DA:
++		return bond_l2da_xmit(skb, dev);
+ 	default:
+ 		/* Should never happen, mode already checked */
+ 		netdev_err(dev, "Unknown bonding mode %d\n", BOND_MODE(bond));
+@@ -4118,6 +4423,10 @@
+ 	struct bonding *bond = netdev_priv(bond_dev);
+ 	if (bond->wq)
+ 		destroy_workqueue(bond->wq);
++
++	if (bond->id != (~0U))
++		clear_bit(bond->id, &bond_id_mask);
++
+ 	free_netdev(bond_dev);
+ }
+ 
+@@ -4195,10 +4504,30 @@
+ 	list_del(&bond->bond_list);
+ 
+ 	bond_debug_unregister(bond);
++
++	if (bond_is_l2da(bond))
++		bond_l2da_deinitialize(bond);
+ }
+ 
+ /*------------------------- Module initialization ---------------------------*/
+ 
++/**
++ * Notify ECM about the change in bond slave
++ */
++void bond_notify_l2da(uint8_t *slave_mac_addr)
++{
++	struct bond_cb *bond_cb_ref;
++
++	rcu_read_lock();
++	bond_cb_ref = rcu_dereference(bond_cb);
++	if (bond_cb_ref && bond_cb_ref->bond_cb_delete_by_mac) {
++		bond_cb_ref->bond_cb_delete_by_mac(slave_mac_addr);
++		pr_info("Deleted fast path rules with mac-id: %pM\n",
++			slave_mac_addr);
++	}
++	rcu_read_unlock();
++}
++
+ static int bond_check_params(struct bond_params *params)
+ {
+ 	int arp_validate_value, fail_over_mac_value, primary_reselect_value, i;
+@@ -4327,6 +4656,19 @@
+ 		all_slaves_active = 0;
+ 	}
+ 
++	if (bond_mode == BOND_MODE_L2DA) {
++		if (!all_slaves_active) {
++			pr_warn("Warning: all_slaves_active must be set, otherwise bonding will not be able to route packets that are essential for l2da operation\n");
++			pr_warn("Forcing all_slaves_active to 1\n");
++			all_slaves_active = 1;
++		}
++		if (!miimon) {
++			pr_warn("Warning: miimon must be specified, otherwise bonding will not detect link failure which is essential for l2da operation\n");
++			pr_warn("Forcing miimon to 100msec\n");
++			miimon = 100;
++		}
++	}
++
+ 	if (resend_igmp < 0 || resend_igmp > 255) {
+ 		pr_warn("Warning: resend_igmp (%d) should be between 0 and 255, resetting to %d\n",
+ 			resend_igmp, BOND_DEFAULT_RESEND_IGMP);
+@@ -4596,9 +4938,19 @@
+ {
+ 	struct bonding *bond = netdev_priv(bond_dev);
+ 	struct bond_net *bn = net_generic(dev_net(bond_dev), bond_net_id);
++	int ret;
+ 
+ 	netdev_dbg(bond_dev, "Begin bond_init\n");
+ 
++	if (bond_is_l2da(bond)) {
++		ret = bond_l2da_initialize(bond);
++		if (ret) {
++			pr_err("%s: l2da mode cannot be initialized\n",
++			       bond->dev->name);
++			return ret;
++		}
++	}
++
+ 	bond->wq = create_singlethread_workqueue(bond_dev->name);
+ 	if (!bond->wq)
+ 		return -ENOMEM;
+@@ -4665,6 +5017,14 @@
+ 	rtnl_unlock();
+ 	if (res < 0)
+ 		bond_destructor(bond_dev);
++
++	bond = netdev_priv(bond_dev);
++	bond->id = ~0U;
++	if (bond_id_mask != (~0UL)) {
++		bond->id = (u32)ffz(bond_id_mask);
++		set_bit(bond->id, &bond_id_mask);
++	}
++
+ 	return res;
+ }
+ 
+@@ -4725,6 +5085,10 @@
+ 	if (res)
+ 		goto err_link;
+ 
++	res = bond_genl_initialize();
++	if (res)
++		goto err_genl;
++
+ 	bond_create_debugfs();
+ 
+ 	for (i = 0; i < max_bonds; i++) {
+@@ -4738,6 +5102,8 @@
+ 	return res;
+ err:
+ 	bond_destroy_debugfs();
++	bond_genl_deinitialize();
++err_genl:
+ 	bond_netlink_fini();
+ err_link:
+ 	unregister_pernet_subsys(&bond_net_ops);
+@@ -4751,6 +5117,7 @@
+ 
+ 	bond_destroy_debugfs();
+ 
++	bond_genl_deinitialize();
+ 	bond_netlink_fini();
+ 	unregister_pernet_subsys(&bond_net_ops);
+ 
+--- a/drivers/net/bonding/bond_3ad.c	2017-04-08 15:53:53.000000000 +0800
++++ b/drivers/net/bonding/bond_3ad.c	2018-11-26 16:33:33.208400228 +0800
+@@ -129,6 +129,37 @@
+ 					struct port *port);
+ static void ad_update_actor_keys(struct port *port, bool reset);
+ 
++struct bond_cb __rcu *bond_cb;
++
++int bond_register_cb(struct bond_cb *cb)
++{
++	struct bond_cb *lag_cb;
++
++	rcu_read_lock();
++	lag_cb = kzalloc(sizeof(*lag_cb), GFP_ATOMIC | __GFP_NOWARN);
++	if (!lag_cb) {
++		rcu_read_unlock();
++		return -1;
++	}
++
++	memcpy((void *)lag_cb, (void *)cb, sizeof(*cb));
++	rcu_assign_pointer(bond_cb, lag_cb);
++	rcu_read_unlock();
++	return 0;
++}
++EXPORT_SYMBOL(bond_register_cb);
++
++void bond_unregister_cb(void)
++{
++	struct bond_cb *lag_cb_main;
++
++	rcu_read_lock();
++	lag_cb_main = rcu_dereference(bond_cb);
++	kfree(lag_cb_main);
++	rcu_assign_pointer(bond_cb, NULL);
++	rcu_read_unlock();
++}
++EXPORT_SYMBOL(bond_unregister_cb);
+ 
+ /* ================= api to bonding and kernel code ================== */
+ 
+@@ -977,6 +1008,27 @@
+ 			ad_disable_collecting_distributing(port,
+ 							   update_slave_arr);
+ 			port->ntt = true;
++
++			/* Send a notificaton about change in state of this
++			 * port. We only want to handle case where port moves
++			 * from AD_MUX_COLLECTING_DISTRIBUTING ->
++			 * AD_MUX_ATTACHED.
++			 */
++			if (bond_slave_is_up(port->slave) &&
++			    (last_state == AD_MUX_COLLECTING_DISTRIBUTING)) {
++				struct bond_cb *lag_cb_main;
++
++				rcu_read_lock();
++				lag_cb_main = rcu_dereference(bond_cb);
++				if (lag_cb_main &&
++				    lag_cb_main->bond_cb_link_down) {
++					struct net_device *dev;
++
++					dev = port->slave->dev;
++					lag_cb_main->bond_cb_link_down(dev);
++				}
++				rcu_read_unlock();
++			}
+ 			break;
+ 		case AD_MUX_COLLECTING_DISTRIBUTING:
+ 			port->actor_oper_port_state |= AD_STATE_COLLECTING;
+@@ -1806,12 +1858,21 @@
+ 					      bool *update_slave_arr)
+ {
+ 	if (port->aggregator->is_active) {
++		struct bond_cb *lag_cb_main;
+ 		pr_debug("Enabling port %d(LAG %d)\n",
+ 			 port->actor_port_number,
+ 			 port->aggregator->aggregator_identifier);
+ 		__enable_port(port);
+ 		/* Slave array needs update */
+ 		*update_slave_arr = true;
++
++		rcu_read_lock();
++		lag_cb_main = rcu_dereference(bond_cb);
++
++		if (lag_cb_main && lag_cb_main->bond_cb_link_up)
++			lag_cb_main->bond_cb_link_up(port->slave->dev);
++
++		rcu_read_unlock();
+ 	}
+ }
+ 
+@@ -2516,6 +2577,102 @@
+ 	return ret;
+ }
+ 
++/* bond_3ad_get_tx_dev - Calculate egress interface for a given packet,
++ * for a LAG that is configured in 802.3AD mode
++ * @skb: pointer to skb to be egressed
++ * @src_mac: pointer to source L2 address
++ * @dst_mac: pointer to destination L2 address
++ * @src: pointer to source L3 address
++ * @dst: pointer to destination L3 address
++ * @protocol: L3 protocol id from L2 header
++ * @bond_dev: pointer to bond master device
++ *
++ * If @skb is NULL, bond_xmit_hash is used to calculate hash using L2/L3
++ * addresses.
++ *
++ * Returns: Either valid slave device, or NULL otherwise
++ */
++struct net_device *bond_3ad_get_tx_dev(struct sk_buff *skb, u8 *src_mac,
++				       u8 *dst_mac, void *src,
++				       void *dst, u16 protocol,
++				       struct net_device *bond_dev,
++				       __be16 *layer4hdr)
++{
++	struct bonding *bond = netdev_priv(bond_dev);
++	struct aggregator *agg;
++	struct ad_info ad_info;
++	struct list_head *iter;
++	struct slave *slave;
++	struct slave *first_ok_slave = NULL;
++	u32 hash = 0;
++	int slaves_in_agg;
++	int slave_agg_no = 0;
++	int agg_id;
++
++	if (__bond_3ad_get_active_agg_info(bond, &ad_info)) {
++		pr_debug("%s: Error: __bond_3ad_get_active_agg_info failed\n",
++			 bond_dev->name);
++		return NULL;
++	}
++
++	slaves_in_agg = ad_info.ports;
++	agg_id = ad_info.aggregator_id;
++
++	if (slaves_in_agg == 0) {
++		pr_debug("%s: Error: active aggregator is empty\n",
++			 bond_dev->name);
++		return NULL;
++	}
++
++	if (skb) {
++		hash = bond_xmit_hash(bond, skb);
++		slave_agg_no = hash % slaves_in_agg;
++	} else {
++		if (bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER23 &&
++		    bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER2 &&
++		    bond->params.xmit_policy != BOND_XMIT_POLICY_LAYER34) {
++			pr_debug("%s: Error: Unsupported hash policy for 802.3AD fast path\n",
++				 bond_dev->name);
++			return NULL;
++		}
++
++		hash = bond_xmit_hash_without_skb(src_mac, dst_mac,
++						  src, dst, protocol,
++						  bond_dev, layer4hdr);
++		slave_agg_no = hash % slaves_in_agg;
++	}
++
++	bond_for_each_slave_rcu(bond, slave, iter) {
++		agg = SLAVE_AD_INFO(slave)->port.aggregator;
++		if (!agg || agg->aggregator_identifier != agg_id)
++			continue;
++
++		if (slave_agg_no >= 0) {
++			if (!first_ok_slave && bond_slave_can_tx(slave))
++				first_ok_slave = slave;
++			slave_agg_no--;
++			continue;
++		}
++
++		if (bond_slave_can_tx(slave))
++			return slave->dev;
++	}
++
++	if (slave_agg_no >= 0) {
++		pr_err("%s: Error: Couldn't find a slave to tx on for aggregator ID %d\n",
++		       bond_dev->name, agg_id);
++		return NULL;
++	}
++
++	/* we couldn't find any suitable slave after the agg_no, so use the
++	 * first suitable found, if found.
++	 */
++	if (first_ok_slave)
++		return first_ok_slave->dev;
++
++	return NULL;
++}
++
+ int bond_3ad_lacpdu_recv(const struct sk_buff *skb, struct bonding *bond,
+ 			 struct slave *slave)
+ {
+--- a/include/net/bonding.h	2017-04-08 15:53:53.000000000 +0800
++++ b/include/net/bonding.h	2018-11-26 16:33:51.504400228 +0800
+@@ -29,6 +29,7 @@
+ #include <net/bond_3ad.h>
+ #include <net/bond_alb.h>
+ #include <net/bond_options.h>
++#include <net/bond_l2da.h>
+ 
+ #define BOND_MAX_ARP_TARGETS	16
+ 
+@@ -86,6 +87,8 @@
+ #define bond_for_each_slave_rcu(bond, pos, iter) \
+ 	netdev_for_each_lower_private_rcu((bond)->dev, pos, iter)
+ 
++extern struct bond_cb __rcu *bond_cb;
++
+ #ifdef CONFIG_NET_POLL_CONTROLLER
+ extern atomic_t netpoll_block_tx;
+ 
+@@ -220,6 +223,7 @@
+ 	u32      rr_tx_counter;
+ 	struct   ad_bond_info ad_info;
+ 	struct   alb_bond_info alb_info;
++	struct   l2da_bond_info l2da_info;
+ 	struct   bond_params params;
+ 	struct   workqueue_struct *wq;
+ 	struct   delayed_work mii_work;
+@@ -233,7 +237,22 @@
+ 	struct	 dentry *debug_dir;
+ #endif /* CONFIG_DEBUG_FS */
+ 	struct rtnl_link_stats64 bond_stats;
++	u32      id;
++};
++
++#pragma pack(1)
++struct arp_pkt {
++	__be16  hw_addr_space;
++	__be16  prot_addr_space;
++	u8      hw_addr_len;
++	u8      prot_addr_len;
++	__be16  op_code;
++	u8      mac_src[ETH_ALEN];	/* sender hardware address */
++	__be32  ip_src;			/* sender IP address */
++	u8      mac_dst[ETH_ALEN];	/* target hardware address */
++	__be32  ip_dst;			/* target IP address */
+ };
++#pragma pack()
+ 
+ #define bond_slave_get_rcu(dev) \
+ 	((struct slave *) rcu_dereference(dev->rx_handler_data))
+@@ -276,6 +295,11 @@
+ 	       BOND_MODE(bond) == BOND_MODE_ALB;
+ }
+ 
++static inline bool bond_is_l2da(const struct bonding *bond)
++{
++	return bond->params.mode == BOND_MODE_L2DA;
++}
++
+ static inline bool bond_is_nondyn_tlb(const struct bonding *bond)
+ {
+ 	return (BOND_MODE(bond) == BOND_MODE_TLB)  &&
+@@ -561,6 +585,11 @@
+ 					      int level);
+ int bond_update_slave_arr(struct bonding *bond, struct slave *skipslave);
+ void bond_slave_arr_work_rearm(struct bonding *bond, unsigned long delay);
++uint32_t bond_xmit_hash_without_skb(uint8_t *src_mac, uint8_t *dst_mac,
++				    void *psrc, void *pdst, uint16_t protocol,
++				    struct net_device *bond_dev,
++				    __be16 *layer4hdr);
++void bond_notify_l2da(uint8_t *slave_mac_addr);
+ 
+ #ifdef CONFIG_PROC_FS
+ void bond_create_proc_entry(struct bonding *bond);
+--- a/include/net/bond_3ad.h	2017-04-08 15:53:53.000000000 +0800
++++ b/include/net/bond_3ad.h	2018-11-26 16:33:51.504400228 +0800
+@@ -306,5 +306,10 @@
+ 			 struct slave *slave);
+ int bond_3ad_set_carrier(struct bonding *bond);
+ void bond_3ad_update_lacp_rate(struct bonding *bond);
++struct net_device *bond_3ad_get_tx_dev(struct sk_buff *skb, uint8_t *src_mac,
++				       uint8_t *dst_mac, void *src,
++				       void *dst, uint16_t protocol,
++				       struct net_device *bond_dev,
++				       __be16 *layer4hdr);
+ #endif /* _NET_BOND_3AD_H */
+ 
+--- a/net/bridge/br_private.h	2017-04-08 15:53:53.000000000 +0800
++++ b/net/bridge/br_private.h	2018-11-26 16:33:55.204400228 +0800
+@@ -21,6 +21,8 @@
+ #include <net/ip6_fib.h>
+ #include <linux/if_vlan.h>
+ #include <linux/rhashtable.h>
++#include <linux/export.h>
++#include <linux/netfilter.h>
+ 
+ #define BR_HASH_BITS 8
+ #define BR_HASH_SIZE (1 << BR_HASH_BITS)
+@@ -506,6 +508,7 @@
+ void br_manage_promisc(struct net_bridge *br);
+ 
+ /* br_input.c */
++int br_pass_frame_up(struct sk_buff *skb);
+ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb);
+ rx_handler_result_t br_handle_frame(struct sk_buff **pskb);
+ 
+@@ -905,15 +908,29 @@
+ 
+ /* br_netfilter.c */
+ #if IS_ENABLED(CONFIG_BRIDGE_NETFILTER)
++extern int brnf_call_ebtables;
+ int br_nf_core_init(void);
+ void br_nf_core_fini(void);
+ void br_netfilter_rtable_init(struct net_bridge *);
++bool br_netfilter_run_hooks(void);
+ #else
+ static inline int br_nf_core_init(void) { return 0; }
+ static inline void br_nf_core_fini(void) {}
+ #define br_netfilter_rtable_init(x)
++#define br_netfilter_run_hooks()	false
+ #endif
+ 
++static inline int
++BR_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk,
++	struct sk_buff *skb, struct net_device *in, struct net_device *out,
++	int (*okfn)(struct net *, struct sock *, struct sk_buff *))
++{
++	if (!br_netfilter_run_hooks())
++		return okfn(net, sk, skb);
++
++	return NF_HOOK(pf, hook, net, sk, skb, in, out, okfn);
++}
++
+ /* br_stp.c */
+ void br_log_state(const struct net_bridge_port *p);
+ void br_set_state(struct net_bridge_port *p, unsigned int state);
+@@ -984,4 +1001,15 @@
+ static inline void br_sysfs_delbr(struct net_device *dev) { return; }
+ #endif /* CONFIG_SYSFS */
+ 
++#define __br_get(__hook, __default, __args ...) \
++		(__hook ? (__hook(__args)) : (__default))
++
++static inline void __br_notify(int group, int type, const void *data)
++{
++	br_notify_hook_t *notify_hook = rcu_dereference(br_notify_hook);
++
++	if (notify_hook)
++		notify_hook(group, type, data);
++}
++
+ #endif
+--- a/net/bridge/br_input.c	2017-04-08 15:53:53.000000000 +0800
++++ b/net/bridge/br_input.c	2018-11-26 17:15:52.644400228 +0800
+@@ -33,7 +33,15 @@
+ 	return netif_receive_skb(skb);
+ }
+ 
+-static int br_pass_frame_up(struct sk_buff *skb)
++/* Hook for external Multicast handler */
++br_multicast_handle_hook_t __rcu *br_multicast_handle_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_multicast_handle_hook);
++
++/* Hook for external forwarding logic */
++br_get_dst_hook_t __rcu *br_get_dst_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_get_dst_hook);
++
++int br_pass_frame_up(struct sk_buff *skb)
+ {
+ 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
+ 	struct net_bridge *br = netdev_priv(brdev);
+@@ -62,10 +70,11 @@
+ 	if (!skb)
+ 		return NET_RX_DROP;
+ 
+-	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
++	return BR_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+ 		       dev_net(indev), NULL, skb, indev, NULL,
+ 		       br_netif_receive_skb);
+ }
++EXPORT_SYMBOL_GPL(br_pass_frame_up);
+ 
+ static void br_do_proxy_arp(struct sk_buff *skb, struct net_bridge *br,
+ 			    u16 vid, struct net_bridge_port *p)
+@@ -135,6 +144,8 @@
+ 	struct net_bridge_fdb_entry *dst;
+ 	struct net_bridge_mdb_entry *mdst;
+ 	struct sk_buff *skb2;
++	struct net_bridge_port *pdst = NULL;
++	br_get_dst_hook_t *get_dst_hook = rcu_dereference(br_get_dst_hook);
+ 	bool unicast = true;
+ 	u16 vid = 0;
+ 
+@@ -192,18 +203,31 @@
+ 
+ 		unicast = false;
+ 		br->dev->stats.multicast++;
+-	} else if ((p->flags & BR_ISOLATE_MODE) ||
+-		   ((dst = __br_fdb_get(br, dest, vid)) && dst->is_local)) {
+-		skb2 = skb;
+-		/* Do not forward the packet since it's local. */
+-		skb = NULL;
++	} else {
++		pdst = __br_get(get_dst_hook, NULL, p, &skb);
++		if (pdst) {
++			if (!skb)
++				goto out;
++		} else {
++			dst = __br_fdb_get(br, dest, vid);
++			if ((p->flags & BR_ISOLATE_MODE) ||
++			    (dst && dst->is_local)) {
++				skb2 = skb;
++				/* Do not forward the packet since it's local.*/
++				skb = NULL;
++			}
++		}
+ 	}
+ 
+ 	if (skb) {
+ 		if (dst) {
+ 			dst->used = jiffies;
+-			br_forward(dst->dst, skb, skb2);
+-		} else
++			pdst = dst->dst;
++		}
++
++		if (pdst)
++			br_forward(pdst, skb, skb2);
++		else
+ 			br_flood_forward(br, skb, skb2, unicast);
+ 	}
+ 
+@@ -291,7 +315,7 @@
+ 		}
+ 
+ 		/* Deliver packet to local host only */
+-		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
++		if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_IN,
+ 			    dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+ 			    br_handle_local_finish)) {
+ 			return RX_HANDLER_CONSUMED; /* consumed by filter */
+@@ -307,7 +331,7 @@
+ 		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+ 			skb->pkt_type = PACKET_HOST;
+ 
+-		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL, skb, skb->dev, NULL,
++		if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+ 			br_handle_local_finish))
+ 			break;
+ 
+@@ -329,7 +353,7 @@
+ 		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+ 			skb->pkt_type = PACKET_HOST;
+ 
+-		NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
++		BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
+ 			dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+ 			br_handle_frame_finish);
+ 		break;
+--- a/net/bridge/br.c	2018-11-27 23:08:03.000000000 +0800
++++ b/net/bridge/br.c	2018-11-26 16:33:55.188400228 +0800
+@@ -266,6 +266,10 @@
+ 	br_fdb_fini();
+ }
+ 
++/* Hook for bridge event notifications */
++br_notify_hook_t __rcu *br_notify_hook __read_mostly;
++EXPORT_SYMBOL_GPL(br_notify_hook);
++
+ module_init(br_init)
+ module_exit(br_deinit)
+ MODULE_LICENSE("GPL");
+--- a/net/bridge/br_netfilter_hooks.c	2018-11-27 23:08:03.000000000 +0800
++++ b/net/bridge/br_netfilter_hooks.c	2018-11-26 17:15:52.644400228 +0800
+@@ -49,6 +49,7 @@
+ static int brnf_call_iptables __read_mostly = 1;
+ static int brnf_call_ip6tables __read_mostly = 1;
+ static int brnf_call_arptables __read_mostly = 1;
++static int brnf_call_custom __read_mostly;
+ static int brnf_filter_vlan_tagged __read_mostly;
+ static int brnf_filter_pppoe_tagged __read_mostly;
+ static int brnf_pass_vlan_indev __read_mostly;
+@@ -56,6 +57,7 @@
+ #define brnf_call_iptables 1
+ #define brnf_call_ip6tables 1
+ #define brnf_call_arptables 1
++#define brnf_call_custom 1
+ #define brnf_filter_vlan_tagged 0
+ #define brnf_filter_pppoe_tagged 0
+ #define brnf_pass_vlan_indev 0
+@@ -70,6 +72,15 @@
+ #define IS_ARP(skb) \
+ 	(!skb_vlan_tag_present(skb) && skb->protocol == htons(ETH_P_ARP))
+ 
++int brnf_call_ebtables __read_mostly;
++EXPORT_SYMBOL_GPL(brnf_call_ebtables);
++
++bool br_netfilter_run_hooks(void)
++{
++	return brnf_call_iptables | brnf_call_ip6tables | brnf_call_arptables |
++		brnf_call_ebtables | brnf_call_custom;
++}
++
+ static inline __be16 vlan_proto(const struct sk_buff *skb)
+ {
+ 	if (skb_vlan_tag_present(skb))
+@@ -701,20 +712,18 @@
+ 
+ static int br_nf_dev_queue_xmit(struct net *net, struct sock *sk, struct sk_buff *skb)
+ {
+-	struct nf_bridge_info *nf_bridge = nf_bridge_info_get(skb);
+-	unsigned int mtu, mtu_reserved;
++	struct nf_bridge_info *nf_bridge;
++	unsigned int mtu_reserved;
+ 
+ 	mtu_reserved = nf_bridge_mtu_reduction(skb);
+-	mtu = skb->dev->mtu;
+-
+-	if (nf_bridge->frag_max_size && nf_bridge->frag_max_size < mtu)
+-		mtu = nf_bridge->frag_max_size;
+ 
+-	if (skb_is_gso(skb) || skb->len + mtu_reserved <= mtu) {
++	if (skb_is_gso(skb) || skb->len + mtu_reserved <= skb->dev->mtu) {
+ 		nf_bridge_info_free(skb);
+ 		return br_dev_queue_push_xmit(net, sk, skb);
+ 	}
+ 
++	nf_bridge = nf_bridge_info_get(skb);
++
+ 	/* This is wrong! We should preserve the original fragment
+ 	 * boundaries by preserving frag_list rather than refragmenting.
+ 	 */
+@@ -975,6 +984,13 @@
+ 		.maxlen		= sizeof(int),
+ 		.mode		= 0644,
+ 		.proc_handler	= brnf_sysctl_call_tables,
++	},
++	{
++		.procname	= "bridge-nf-call-custom",
++		.data		= &brnf_call_custom,
++		.maxlen		= sizeof(int),
++		.mode		= 0644,
++		.proc_handler	= brnf_sysctl_call_tables,
+ 	},
+ 	{ }
+ };
+--- a/drivers/net/bonding/Makefile	2018-11-27 23:08:03.000000000 +0800
++++ b/drivers/net/bonding/Makefile	2018-11-26 16:33:33.208400228 +0800
+@@ -4,7 +4,8 @@
+ 
+ obj-$(CONFIG_BONDING) += bonding.o
+ 
+-bonding-objs := bond_main.o bond_3ad.o bond_alb.o bond_sysfs.o bond_sysfs_slave.o bond_debugfs.o bond_netlink.o bond_options.o
++bonding-objs := bond_main.o bond_3ad.o bond_alb.o bond_sysfs.o bond_sysfs_slave.o bond_debugfs.o \
++	bond_netlink.o bond_options.o bond_l2da.o bond_l2da_ctrl.o bond_genl.o
+ 
+ proc-$(CONFIG_PROC_FS) += bond_procfs.o
+ bonding-objs += $(proc-y)
+--- a/drivers/net/bonding/bond_alb.c	2018-11-27 23:08:03.000000000 +0800
++++ b/drivers/net/bonding/bond_alb.c	2018-11-26 16:33:33.208400228 +0800
+@@ -60,18 +60,6 @@
+ 	__be16 type;
+ 	u8 padding[ETH_ZLEN - ETH_HLEN];
+ };
+-
+-struct arp_pkt {
+-	__be16  hw_addr_space;
+-	__be16  prot_addr_space;
+-	u8      hw_addr_len;
+-	u8      prot_addr_len;
+-	__be16  op_code;
+-	u8      mac_src[ETH_ALEN];	/* sender hardware address */
+-	__be32  ip_src;			/* sender IP address */
+-	u8      mac_dst[ETH_ALEN];	/* target hardware address */
+-	__be32  ip_dst;			/* target IP address */
+-};
+ #pragma pack()
+ 
+ static inline struct arp_pkt *arp_pkt(const struct sk_buff *skb)
+--- a/net/netfilter/Makefile	2018-12-08 10:38:21.696493380 +0800
++++ b/net/netfilter/Makefile	2018-11-26 16:33:56.152400228 +0800
+@@ -5,6 +5,7 @@
+ nf_conntrack-$(CONFIG_NF_CONNTRACK_TIMESTAMP) += nf_conntrack_timestamp.o
+ nf_conntrack-$(CONFIG_NF_CONNTRACK_EVENTS) += nf_conntrack_ecache.o
+ nf_conntrack-$(CONFIG_NF_CONNTRACK_LABELS) += nf_conntrack_labels.o
++nf_conntrack-$(CONFIG_NF_CONNTRACK_DSCPREMARK_EXT) += nf_conntrack_dscpremark_ext.o
+ 
+ obj-$(CONFIG_NETFILTER) = netfilter.o
+ 
