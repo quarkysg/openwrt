@@ -1,0 +1,138 @@
+--- a/net/bridge/br_device.c	2018-11-27 23:08:03.000000000 +0800
++++ b/net/bridge/br_device.c	2018-11-26 17:15:52.644400228 +0800
+@@ -40,6 +40,8 @@
+ 	struct pcpu_sw_netstats *brstats = this_cpu_ptr(br->stats);
+ 	const struct nf_br_ops *nf_ops;
+ 	u16 vid = 0;
++	struct net_bridge_port *pdst;
++	br_get_dst_hook_t *get_dst_hook;
+ 
+ 	rcu_read_lock();
+ 	nf_ops = rcu_dereference(nf_br_ops);
+@@ -61,9 +63,16 @@
+ 	if (!br_allowed_ingress(br, br_vlan_group_rcu(br), skb, &vid))
+ 		goto out;
+ 
++	get_dst_hook = rcu_dereference(br_get_dst_hook);
++
+ 	if (is_broadcast_ether_addr(dest))
+ 		br_flood_deliver(br, skb, false);
+ 	else if (is_multicast_ether_addr(dest)) {
++		br_multicast_handle_hook_t *multicast_handle_hook =
++			rcu_dereference(br_multicast_handle_hook);
++		if (!__br_get(multicast_handle_hook, true, NULL, skb))
++			goto out;
++
+ 		if (unlikely(netpoll_tx_running(dev))) {
+ 			br_flood_deliver(br, skb, false);
+ 			goto out;
+@@ -79,10 +88,20 @@
+ 			br_multicast_deliver(mdst, skb);
+ 		else
+ 			br_flood_deliver(br, skb, false);
+-	} else if ((dst = __br_fdb_get(br, dest, vid)) != NULL)
+-		br_deliver(dst->dst, skb);
+-	else
+-		br_flood_deliver(br, skb, true);
++	} else {
++		pdst = __br_get(get_dst_hook, NULL, NULL, &skb);
++		if (pdst) {
++			if (!skb)
++				goto out;
++			br_deliver(pdst, skb);
++		} else {
++			dst = __br_fdb_get(br, dest, vid);
++			if (dst)
++				br_deliver(dst->dst, skb);
++			else
++				br_flood_deliver(br, skb, true);
++		}
++	}
+ 
+ out:
+ 	rcu_read_unlock();
+--- a/net/bridge/br_forward.c	2018-12-09 14:19:08.909248964 +0800
++++ b/net/bridge/br_forward.c	2018-11-26 17:15:52.644400228 +0800
+@@ -33,7 +33,8 @@
+ 	struct net_bridge_vlan_group *vg;
+ 
+ 	vg = nbp_vlan_group_rcu(p);
+-	return ((p->flags & BR_HAIRPIN_MODE) || skb->dev != p->dev) &&
++	return ((skb->dev != p->dev) || ((p->flags & BR_HAIRPIN_MODE) &&
++		(!is_multicast_ether_addr(eth_hdr(skb)->h_dest)))) &&
+ 		br_allowed_egress(vg, skb) && p->state == BR_STATE_FORWARDING;
+ }
+ 
+@@ -69,7 +70,7 @@
+ 
+ int br_forward_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
+ {
+-	return NF_HOOK(NFPROTO_BRIDGE, NF_BR_POST_ROUTING,
++	return BR_HOOK(NFPROTO_BRIDGE, NF_BR_POST_ROUTING,
+ 		       net, sk, skb, NULL, skb->dev,
+ 		       br_dev_queue_push_xmit);
+ 
+@@ -97,7 +98,7 @@
+ 		return;
+ 	}
+ 
+-	NF_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_OUT,
++	BR_HOOK(NFPROTO_BRIDGE, NF_BR_LOCAL_OUT,
+ 		dev_net(skb->dev), NULL, skb,NULL, skb->dev,
+ 		br_forward_finish);
+ }
+@@ -121,7 +122,7 @@
+ 	skb->dev = to->dev;
+ 	skb_forward_csum(skb);
+ 
+-	NF_HOOK(NFPROTO_BRIDGE, NF_BR_FORWARD,
++	BR_HOOK(NFPROTO_BRIDGE, NF_BR_FORWARD,
+ 		dev_net(indev), NULL, skb, indev, skb->dev,
+ 		br_forward_finish);
+ }
+@@ -136,7 +137,6 @@
+ 
+ 	kfree_skb(skb);
+ }
+-EXPORT_SYMBOL_GPL(br_deliver);
+ 
+ /* called with rcu_read_lock */
+ void br_forward(const struct net_bridge_port *to, struct sk_buff *skb, struct sk_buff *skb0)
+@@ -271,6 +271,7 @@
+ {
+ 	br_flood(br, skb, NULL, __br_deliver, unicast, false);
+ }
++EXPORT_SYMBOL_GPL(br_deliver);
+ 
+ /* called under bridge lock */
+ void br_flood_forward(struct net_bridge *br, struct sk_buff *skb,
+@@ -278,6 +279,7 @@
+ {
+ 	br_flood(br, skb, skb2, __br_forward, unicast, true);
+ }
++EXPORT_SYMBOL_GPL(br_forward);
+ 
+ #ifdef CONFIG_BRIDGE_IGMP_SNOOPING
+ /* called with rcu_read_lock */
+--- a/net/bridge/br_netlink.c	2018-11-27 23:08:03.000000000 +0800
++++ b/net/bridge/br_netlink.c	2018-11-26 16:33:55.204400228 +0800
+@@ -449,6 +449,7 @@
+ 		kfree_skb(skb);
+ 		goto errout;
+ 	}
++	__br_notify(RTNLGRP_LINK, event, port);
+ 	rtnl_notify(skb, net, 0, RTNLGRP_LINK, NULL, GFP_ATOMIC);
+ 	return;
+ errout:
+@@ -1079,9 +1069,9 @@
+ 
+ 	err = br_changelink(dev, tb, data);
+ 	if (err)
+-		br_dev_delete(dev, NULL);
++		return err;
+ 
+-	return err;
++	return register_netdevice(dev);
+ }
+ 
+ static size_t br_get_size(const struct net_device *brdev)

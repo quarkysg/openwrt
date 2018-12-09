@@ -1348,6 +1348,18 @@
  	bool unicast = true;
  	u16 vid = 0;
  
+@@ -177,6 +177,11 @@
+ 		skb2 = skb;
+ 		unicast = false;
+ 	} else if (is_multicast_ether_addr(dest)) {
++		br_multicast_handle_hook_t *multicast_handle_hook =
++			rcu_dereference(br_multicast_handle_hook);
++		if (!__br_get(multicast_handle_hook, true, p, skb))
++			goto out;
++
+ 		mdst = br_mdb_get(br, skb, vid);
+ 		if ((mdst || BR_INPUT_SKB_CB_MROUTERS_ONLY(skb)) &&
+ 		    br_multicast_querier_exists(br, eth_hdr(skb))) {
 @@ -192,18 +203,31 @@
  
  		unicast = false;
@@ -1396,16 +1408,35 @@
  			    dev_net(skb->dev), NULL, skb, skb->dev, NULL,
  			    br_handle_local_finish)) {
  			return RX_HANDLER_CONSUMED; /* consumed by filter */
-@@ -307,7 +331,7 @@
- 		if (ether_addr_equal(p->br->dev->dev_addr, dest))
- 			skb->pkt_type = PACKET_HOST;
+@@ -304,16 +333,19 @@
+ forward:
+ 	switch (p->state) {
+ 	case BR_STATE_DISABLED:
+-		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+-			skb->pkt_type = PACKET_HOST;
++		if (skb->protocol == htons(ETH_P_PAE)) {
++			if (ether_addr_equal(p->br->dev->dev_addr, dest))
++				skb->pkt_type = PACKET_HOST;
++
++			if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL,
++				skb, skb->dev, NULL, br_handle_local_finish))
++				break;
  
 -		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL, skb, skb->dev, NULL,
-+		if (BR_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING, dev_net(skb->dev), NULL, skb, skb->dev, NULL,
- 			br_handle_local_finish))
+-			br_handle_local_finish))
++			BR_INPUT_SKB_CB(skb)->brdev = p->br->dev;
++			br_pass_frame_up(skb);
  			break;
+-
+-		BR_INPUT_SKB_CB(skb)->brdev = p->br->dev;
+-		br_pass_frame_up(skb);
+-		break;
++		}
++		goto drop;
  
-@@ -329,7 +353,7 @@
+ 	case BR_STATE_FORWARDING:
+ 		rhook = rcu_dereference(br_should_route_hook);
+@@ -329,7 +361,7 @@
  		if (ether_addr_equal(p->br->dev->dev_addr, dest))
  			skb->pkt_type = PACKET_HOST;
  
