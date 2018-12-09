@@ -1,0 +1,89 @@
+--- a/include/linux/switch.h	2018-12-04 20:46:58.361242375 +0800
++++ b/include/linux/switch.h	2018-12-02 21:27:08.764099059 +0800
+@@ -83,6 +83,10 @@
+  */
+ struct switch_dev_ops {
+ 	struct switch_attrlist attr_global, attr_port, attr_vlan;
++	struct switch_attrlist attr_reg;
++
++	int (*get_reg_val)(struct switch_dev *dev, int reg, int *val);
++	int (*set_reg_val)(struct switch_dev *dev, int reg, int val);
+ 
+ 	int (*get_vlan_ports)(struct switch_dev *dev, struct switch_val *val);
+ 	int (*set_vlan_ports)(struct switch_dev *dev, struct switch_val *val);
+@@ -146,6 +150,12 @@
+ 	const char *s;
+ };
+ 
++struct switch_ext {
++	const char *option_name;
++	const char *option_value;
++	struct switch_ext *next;
++};
++
+ struct switch_val {
+ 	const struct switch_attr *attr;
+ 	unsigned int port_vlan;
+@@ -155,6 +165,7 @@
+ 		u32 i;
+ 		struct switch_port *ports;
+ 		struct switch_port_link *link;
++		struct switch_ext *ext_val;
+ 	} value;
+ };
+ 
+--- a/include/uapi/linux/switch.h	2018-12-04 20:46:58.361242375 +0800
++++ b/include/uapi/linux/switch.h	2018-11-26 16:33:52.196400228 +0800
+@@ -47,13 +47,17 @@
+ 	SWITCH_ATTR_OP_NAME,
+ 	SWITCH_ATTR_OP_PORT,
+ 	SWITCH_ATTR_OP_VLAN,
++	SWITCH_ATTR_OP_REG,
+ 	SWITCH_ATTR_OP_VALUE_INT,
+ 	SWITCH_ATTR_OP_VALUE_STR,
+ 	SWITCH_ATTR_OP_VALUE_PORTS,
+ 	SWITCH_ATTR_OP_VALUE_LINK,
++	SWITCH_ATTR_OP_VALUE_EXT,
+ 	SWITCH_ATTR_OP_DESCRIPTION,
+ 	/* port lists */
+ 	SWITCH_ATTR_PORT,
++	/* switch_ext attribute */
++	SWITCH_ATTR_EXT,
+ 	SWITCH_ATTR_MAX
+ };
+ 
+@@ -78,7 +82,10 @@
+ 	SWITCH_CMD_SET_PORT,
+ 	SWITCH_CMD_LIST_VLAN,
+ 	SWITCH_CMD_GET_VLAN,
+-	SWITCH_CMD_SET_VLAN
++	SWITCH_CMD_SET_VLAN,
++	SWITCH_CMD_LIST_REG,
++	SWITCH_CMD_GET_REG,
++	SWITCH_CMD_SET_REG,
+ };
+ 
+ /* data types */
+@@ -88,6 +95,7 @@
+ 	SWITCH_TYPE_STRING,
+ 	SWITCH_TYPE_PORTS,
+ 	SWITCH_TYPE_LINK,
++	SWITCH_TYPE_EXT,
+ 	SWITCH_TYPE_NOVAL,
+ };
+ 
+@@ -113,6 +121,14 @@
+ 	SWITCH_LINK_ATTR_MAX,
+ };
+ 
++/* switch_ext nested attributes */
++enum {
++	SWITCH_EXT_UNSPEC,
++	SWITCH_EXT_NAME,
++	SWITCH_EXT_VALUE,
++	SWITCH_EXT_ATTR_MAX
++};
++
+ #define SWITCH_ATTR_DEFAULTS_OFFSET	0x1000
+ 
+ 
