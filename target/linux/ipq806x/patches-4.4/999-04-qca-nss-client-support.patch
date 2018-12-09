@@ -1,0 +1,672 @@
+--- a/include/net/ip_tunnels.h	2018-11-27 23:08:03.000000000 +0800
++++ b/include/net/ip_tunnels.h	2018-11-26 16:33:51.540400228 +0800
+@@ -367,4 +372,6 @@
+ 
+ #endif /* CONFIG_INET */
+ 
++void ipip6_update_offload_stats(struct net_device *dev, void *ptr);
++void ip6_update_offload_stats(struct net_device *dev, void *ptr);
+ #endif /* __NET_IP_TUNNELS_H */
+--- a/net/ipv6/sit.c	2018-11-27 23:08:03.000000000 +0800
++++ b/net/ipv6/sit.c	2018-11-26 16:33:55.832400228 +0800
+@@ -87,6 +87,21 @@
+ 	struct net_device *fb_tunnel_dev;
+ };
+ 
++void ipip6_update_offload_stats(struct net_device *dev, void *ptr)
++{
++	struct pcpu_sw_netstats *tstats = per_cpu_ptr(dev->tstats, 0);
++	const struct pcpu_sw_netstats *offload_stats =
++					(struct pcpu_sw_netstats *)ptr;
++
++	u64_stats_update_begin(&tstats->syncp);
++	tstats->tx_packets += offload_stats->tx_packets;
++	tstats->tx_bytes   += offload_stats->tx_bytes;
++	tstats->rx_packets += offload_stats->rx_packets;
++	tstats->rx_bytes   += offload_stats->rx_bytes;
++	u64_stats_update_end(&tstats->syncp);
++}
++EXPORT_SYMBOL(ipip6_update_offload_stats);
++
+ /*
+  * Must be invoked with rcu_read_lock
+  */
+--- a/include/net/addrconf.h	2018-11-27 23:08:03.000000000 +0800
++++ b/include/net/addrconf.h	2018-11-26 16:33:51.504400228 +0800
+@@ -387,6 +385,9 @@
+ #endif
+ }
+ 
++struct net_device *ipv6_dev_find(struct net *net, struct in6_addr *addr,
++				 int strict);
++
+ #ifdef CONFIG_PROC_FS
+ int if6_proc_init(void);
+ void if6_proc_exit(void);
+--- a/include/uapi/linux/pkt_sched.h	2018-12-08 14:55:23.352259783 +0800
++++ b/include/uapi/linux/pkt_sched.h	2018-11-26 17:15:52.488400228 +0800
+@@ -112,6 +112,235 @@
+ 
+ #define TCA_STAB_MAX (__TCA_STAB_MAX - 1)
+ 
++enum {
++	TCA_NSS_ACCEL_MODE_NSS_FW,
++	TCA_NSS_ACCEL_MODE_PPE,
++	TCA_NSS_ACCEL_MODE_MAX
++};
++
++/* NSSFIFO section */
++
++enum {
++	TCA_NSSFIFO_UNSPEC,
++	TCA_NSSFIFO_PARMS,
++	__TCA_NSSFIFO_MAX
++};
++
++#define TCA_NSSFIFO_MAX	(__TCA_NSSFIFO_MAX - 1)
++
++struct tc_nssfifo_qopt {
++	__u32	limit;		/* Queue length: bytes for bfifo, packets for pfifo */
++	__u8	set_default;	/* Sets qdisc to be the default qdisc for enqueue */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSWRED section */
++
++enum {
++	TCA_NSSWRED_UNSPEC,
++	TCA_NSSWRED_PARMS,
++	__TCA_NSSWRED_MAX
++};
++
++#define TCA_NSSWRED_MAX (__TCA_NSSWRED_MAX - 1)
++#define NSSWRED_CLASS_MAX 6
++struct tc_red_alg_parameter {
++	__u32	min;	/* qlen_avg < min: pkts are all enqueued */
++	__u32	max;	/* qlen_avg > max: pkts are all dropped */
++	__u32	probability;/* Drop probability at qlen_avg = max */
++	__u32	exp_weight_factor;/* exp_weight_factor for calculate qlen_avg */
++};
++
++struct tc_nsswred_traffic_class {
++	__u32 limit;			/* Queue length */
++	__u32 weight_mode_value;	/* Weight mode value */
++	struct tc_red_alg_parameter rap;/* Parameters for RED alg */
++};
++
++/*
++ * Weight modes for WRED
++ */
++enum tc_nsswred_weight_modes {
++	TC_NSSWRED_WEIGHT_MODE_DSCP = 0,/* Weight mode is DSCP */
++	TC_NSSWRED_WEIGHT_MODES,	/* Must be last */
++};
++
++struct tc_nsswred_qopt {
++	__u32	limit;			/* Queue length */
++	enum tc_nsswred_weight_modes weight_mode;
++					/* Weight mode */
++	__u32	traffic_classes;	/* How many traffic classes: DPs */
++	__u32	def_traffic_class;	/* Default traffic if no match: def_DP */
++	__u32	traffic_id;		/* The traffic id to be configured: DP */
++	__u32	weight_mode_value;	/* Weight mode value */
++	struct tc_red_alg_parameter rap;/* RED algorithm parameters */
++	struct tc_nsswred_traffic_class tntc[NSSWRED_CLASS_MAX];
++					/* Traffic settings for dumpping */
++	__u8	ecn;			/* Setting ECN bit or dropping */
++	__u8	set_default;		/* Sets qdisc to be the default for enqueue */
++	__u8	accel_mode;		/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSCODEL section */
++
++enum {
++	TCA_NSSCODEL_UNSPEC,
++	TCA_NSSCODEL_PARMS,
++	__TCA_NSSCODEL_MAX
++};
++
++#define TCA_NSSCODEL_MAX	(__TCA_NSSCODEL_MAX - 1)
++
++struct tc_nsscodel_qopt {
++	__u32	target;		/* Acceptable queueing delay */
++	__u32	limit;		/* Max number of packets that can be held in the queue */
++	__u32	interval;	/* Monitoring interval */
++	__u8	set_default;	/* Sets qdisc to be the default qdisc for enqueue */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++struct tc_nsscodel_xstats {
++	__u32 peak_queue_delay;	/* Peak delay experienced by a dequeued packet */
++	__u32 peak_drop_delay;	/* Peak delay experienced by a dropped packet */
++};
++
++/* NSSTBL section */
++
++enum {
++	TCA_NSSTBL_UNSPEC,
++	TCA_NSSTBL_PARMS,
++	__TCA_NSSTBL_MAX
++};
++
++#define TCA_NSSTBL_MAX	(__TCA_NSSTBL_MAX - 1)
++
++struct tc_nsstbl_qopt {
++	__u32	burst;		/* Maximum burst size */
++	__u32	rate;		/* Limiting rate of TBF */
++	__u32	peakrate;	/* Maximum rate at which TBF is allowed to send */
++	__u32	mtu;		/* Max size of packet, or minumim burst size */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSPRIO section */
++
++#define TCA_NSSPRIO_MAX_BANDS 256
++
++enum {
++	TCA_NSSPRIO_UNSPEC,
++	TCA_NSSPRIO_PARMS,
++	__TCA_NSSPRIO_MAX
++};
++
++#define TCA_NSSPRIO_MAX	(__TCA_NSSPRIO_MAX - 1)
++
++struct tc_nssprio_qopt {
++	__u32	bands;		/* Number of bands */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSBF section */
++
++enum {
++	TCA_NSSBF_UNSPEC,
++	TCA_NSSBF_CLASS_PARMS,
++	TCA_NSSBF_QDISC_PARMS,
++	__TCA_NSSBF_MAX
++};
++
++#define TCA_NSSBF_MAX	(__TCA_NSSBF_MAX - 1)
++
++struct tc_nssbf_class_qopt {
++	__u32	burst;		/* Maximum burst size */
++	__u32	rate;		/* Allowed bandwidth for this class */
++	__u32	mtu;		/* MTU of the associated interface */
++	__u32	quantum;	/* Quantum allocation for DRR */
++};
++
++struct tc_nssbf_qopt {
++	__u16	defcls;		/* Default class value */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSWRR section */
++
++enum {
++	TCA_NSSWRR_UNSPEC,
++	TCA_NSSWRR_CLASS_PARMS,
++	TCA_NSSWRR_QDISC_PARMS,
++	__TCA_NSSWRR_MAX
++};
++
++#define TCA_NSSWRR_MAX	(__TCA_NSSWRR_MAX - 1)
++
++struct tc_nsswrr_class_qopt {
++	__u32	quantum;	/* Weight associated to this class */
++};
++
++struct tc_nsswrr_qopt {
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSWFQ section */
++
++enum {
++	TCA_NSSWFQ_UNSPEC,
++	TCA_NSSWFQ_CLASS_PARMS,
++	TCA_NSSWFQ_QDISC_PARMS,
++	__TCA_NSSWFQ_MAX
++};
++
++#define TCA_NSSWFQ_MAX	(__TCA_NSSWFQ_MAX - 1)
++
++struct tc_nsswfq_class_qopt {
++	__u32	quantum;	/* Weight associated to this class */
++};
++
++struct tc_nsswfq_qopt {
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSHTB section */
++
++enum {
++	TCA_NSSHTB_UNSPEC,
++	TCA_NSSHTB_CLASS_PARMS,
++	TCA_NSSHTB_QDISC_PARMS,
++	__TCA_NSSHTB_MAX
++};
++
++#define TCA_NSSHTB_MAX	(__TCA_NSSHTB_MAX - 1)
++
++struct tc_nsshtb_class_qopt {
++	__u32	burst;		/* Allowed burst size */
++	__u32	rate;		/* Allowed bandwidth for this class */
++	__u32	cburst;		/* Maximum burst size */
++	__u32	crate;		/* Maximum bandwidth for this class */
++	__u32	quantum;	/* Quantum allocation for DRR */
++	__u32	priority;	/* Priority value associated with this class */
++	__u32	overhead;	/* Overhead in bytes per packet */
++};
++
++struct tc_nsshtb_qopt {
++	__u32	r2q;		/* Rate to quantum ratio */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
++/* NSSBLACKHOLE section */
++
++enum {
++	TCA_NSSBLACKHOLE_UNSPEC,
++	TCA_NSSBLACKHOLE_PARMS,
++	__TCA_NSSBLACKHOLE_MAX
++};
++
++#define TCA_NSSBLACKHOLE_MAX	(__TCA_NSSBLACKHOLE_MAX - 1)
++
++struct tc_nssblackhole_qopt {
++	__u8	set_default;	/* Sets qdisc to be the default qdisc for enqueue */
++	__u8	accel_mode;	/* Dictates which data plane offloads the qdisc */
++};
++
+ /* FIFO section */
+ 
+ struct tc_fifo_qopt {
+@@ -226,6 +455,33 @@
+ 	__s32		allot;
+ };
+ 
++/* ESFQ section */
++
++enum
++{
++        /* traditional */
++	TCA_SFQ_HASH_CLASSIC,
++	TCA_SFQ_HASH_DST,
++	TCA_SFQ_HASH_SRC,
++	TCA_SFQ_HASH_FWMARK,
++	/* conntrack */
++	TCA_SFQ_HASH_CTORIGDST,
++	TCA_SFQ_HASH_CTORIGSRC,
++	TCA_SFQ_HASH_CTREPLDST,
++	TCA_SFQ_HASH_CTREPLSRC,
++	TCA_SFQ_HASH_CTNATCHG,
++};
++
++struct tc_esfq_qopt
++{
++	unsigned	quantum;	/* Bytes per round allocated to flow */
++	int		perturb_period;	/* Period of hash perturbation */
++	__u32		limit;		/* Maximal packets in queue */
++	unsigned	divisor;	/* Hash divisor  */
++	unsigned	flows;		/* Maximal number of flows  */
++	unsigned	hash_kind;	/* Hash function to use for flow identification */
++};
++
+ /* RED section */
+ 
+ enum {
+--- a/net/ipv6/ip6_tunnel.c	2018-12-08 20:07:45.754484035 +0800
++++ b/net/ipv6/ip6_tunnel.c	2018-12-02 21:27:08.840099059 +0800
+@@ -122,6 +122,115 @@
+ 	return &dev->stats;
+ }
+ 
++/*
++ * Update offload stats
++ */
++void ip6_update_offload_stats(struct net_device *dev, void *ptr)
++{
++	struct pcpu_sw_netstats *tstats = per_cpu_ptr(dev->tstats, 0);
++	const struct pcpu_sw_netstats *offload_stats =
++					(struct pcpu_sw_netstats *)ptr;
++
++	u64_stats_update_begin(&tstats->syncp);
++	tstats->tx_packets += offload_stats->tx_packets;
++	tstats->tx_bytes   += offload_stats->tx_bytes;
++	tstats->rx_packets += offload_stats->rx_packets;
++	tstats->rx_bytes   += offload_stats->rx_bytes;
++	u64_stats_update_end(&tstats->syncp);
++}
++EXPORT_SYMBOL(ip6_update_offload_stats);
++
++/*
++ * Locking : hash tables are protected by RCU and RTNL
++ */
++
++static void ip6_tnl_per_cpu_dst_set(struct ip6_tnl_dst *idst,
++				    struct dst_entry *dst)
++{
++	write_seqlock_bh(&idst->lock);
++	dst_release(rcu_dereference_protected(
++			    idst->dst,
++			    lockdep_is_held(&idst->lock.lock)));
++	if (dst) {
++		dst_hold(dst);
++		idst->cookie = rt6_get_cookie((struct rt6_info *)dst);
++	} else {
++		idst->cookie = 0;
++	}
++	rcu_assign_pointer(idst->dst, dst);
++	write_sequnlock_bh(&idst->lock);
++}
++
++struct dst_entry *ip6_tnl_dst_get(struct ip6_tnl *t)
++{
++	struct ip6_tnl_dst *idst;
++	struct dst_entry *dst;
++	unsigned int seq;
++	u32 cookie;
++
++	idst = raw_cpu_ptr(t->dst_cache);
++
++	rcu_read_lock();
++	do {
++		seq = read_seqbegin(&idst->lock);
++		dst = rcu_dereference(idst->dst);
++		cookie = idst->cookie;
++	} while (read_seqretry(&idst->lock, seq));
++
++	if (dst && !atomic_inc_not_zero(&dst->__refcnt))
++		dst = NULL;
++	rcu_read_unlock();
++
++	if (dst && dst->obsolete && !dst->ops->check(dst, cookie)) {
++		ip6_tnl_per_cpu_dst_set(idst, NULL);
++		dst_release(dst);
++		dst = NULL;
++	}
++	return dst;
++}
++EXPORT_SYMBOL_GPL(ip6_tnl_dst_get);
++
++void ip6_tnl_dst_reset(struct ip6_tnl *t)
++{
++	int i;
++
++	for_each_possible_cpu(i)
++		ip6_tnl_per_cpu_dst_set(per_cpu_ptr(t->dst_cache, i), NULL);
++}
++EXPORT_SYMBOL_GPL(ip6_tnl_dst_reset);
++
++void ip6_tnl_dst_set(struct ip6_tnl *t, struct dst_entry *dst)
++{
++	ip6_tnl_per_cpu_dst_set(raw_cpu_ptr(t->dst_cache), dst);
++
++}
++EXPORT_SYMBOL_GPL(ip6_tnl_dst_set);
++
++void ip6_tnl_dst_destroy(struct ip6_tnl *t)
++{
++	if (!t->dst_cache)
++		return;
++
++	ip6_tnl_dst_reset(t);
++	free_percpu(t->dst_cache);
++}
++EXPORT_SYMBOL_GPL(ip6_tnl_dst_destroy);
++
++int ip6_tnl_dst_init(struct ip6_tnl *t)
++{
++	int i;
++
++	t->dst_cache = alloc_percpu(struct ip6_tnl_dst);
++	if (!t->dst_cache)
++		return -ENOMEM;
++
++	for_each_possible_cpu(i)
++		seqlock_init(&per_cpu_ptr(t->dst_cache, i)->lock);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(ip6_tnl_dst_init);
++
+ /**
+  * ip6_tnl_lookup - fetch tunnel matching the end-point addresses
+  *   @remote: the address of the tunnel exit-point
+@@ -249,7 +358,7 @@
+ {
+ 	struct ip6_tnl *t = netdev_priv(dev);
+ 
+-	dst_cache_destroy(&t->dst_cache);
++	ip6_tnl_dst_destroy(t);
+ 	free_percpu(dev->tstats);
+ 	free_netdev(dev);
+ }
+@@ -391,7 +497,7 @@
+ 		RCU_INIT_POINTER(ip6n->tnls_wc[0], NULL);
+ 	else
+ 		ip6_tnl_unlink(ip6n, t);
+-	dst_cache_reset(&t->dst_cache);
++	ip6_tnl_dst_reset(t);
+ 	dev_put(dev);
+ }
+ 
+@@ -973,6 +1079,8 @@
+ 		tstats->rx_bytes += skb->len;
+ 		u64_stats_update_end(&tstats->syncp);
+ 
++		/* Reset the skb_iif to Tunnels interface index */
++		skb->skb_iif = t->dev->ifindex;
+ 		netif_rx(skb);
+ 
+ 		rcu_read_unlock();
+@@ -1098,10 +1206,11 @@
+ 	struct ip6_tnl *t = netdev_priv(dev);
+ 	struct net *net = t->net;
+ 	struct net_device_stats *stats = &t->dev->stats;
+-	struct ipv6hdr *ipv6h;
++	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
+ 	struct ipv6_tel_txoption opt;
+ 	struct dst_entry *dst = NULL, *ndst = NULL;
+ 	struct net_device *tdev;
++	bool use_cache = false;
+ 	int mtu;
+ 	unsigned int max_headroom = sizeof(struct ipv6hdr);
+ 	u8 proto;
+@@ -1129,8 +1238,16 @@
+ 
+ 		memcpy(&fl6->daddr, addr6, sizeof(fl6->daddr));
+ 		neigh_release(neigh);
+-	} else if (!fl6->flowi6_mark)
+-		dst = dst_cache_get(&t->dst_cache);
++	} else if (!(t->parms.flags &
++		     (IP6_TNL_F_USE_ORIG_TCLASS | IP6_TNL_F_USE_ORIG_FWMARK))) {
++		/* enable the cache only only if the routing decision does
++		 * not depend on the current inner header value
++		 */
++		use_cache = true;
++	}
++
++	if (use_cache)
++		dst = ip6_tnl_dst_get(t);
+ 
+ 	if (!ip6_tnl_xmit_ctl(t, &fl6->saddr, &fl6->daddr))
+ 		goto tx_err_link_failure;
+@@ -1193,8 +1310,8 @@
+ 		skb = new_skb;
+ 	}
+ 
+-	if (!fl6->flowi6_mark && ndst)
+-		dst_cache_set_ip6(&t->dst_cache, ndst, &fl6->saddr);
++	if (use_cache && ndst)
++		ip6_tnl_dst_set(t, ndst);
+ 	skb_dst_set(skb, dst);
+ 
+ 	skb->transport_header = skb->network_header;
+@@ -1219,6 +1336,9 @@
+ 	ipv6h->nexthdr = proto;
+ 	ipv6h->saddr = fl6->saddr;
+ 	ipv6h->daddr = fl6->daddr;
++
++	/* Reset the skb_iif to Tunnels interface index */
++	skb->skb_iif = dev->ifindex;
+ 	ip6tunnel_xmit(NULL, skb, dev);
+ 	return 0;
+ tx_err_link_failure:
+@@ -1233,19 +1353,15 @@
+ ip4ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+ 	struct ip6_tnl *t = netdev_priv(dev);
+-	const struct iphdr  *iph;
++	const struct iphdr  *iph = ip_hdr(skb);
+ 	int encap_limit = -1;
+ 	struct flowi6 fl6;
+ 	__u8 dsfield;
+ 	__u32 mtu;
+ 	u8 tproto;
+ 	int err;
++	struct __ip6_tnl_fmr *fmr;
+ 
+-	/* ensure we can access the full inner ip header */
+-	if (!pskb_may_pull(skb, sizeof(struct iphdr)))
+-		return -1;
+-
+-	iph = ip_hdr(skb);
+ 	memset(&(IPCB(skb)->opt), 0, sizeof(IPCB(skb)->opt));
+ 
+ 	tproto = ACCESS_ONCE(t->parms.proto);
+@@ -1266,6 +1382,18 @@
+ 	if (t->parms.flags & IP6_TNL_F_USE_ORIG_FWMARK)
+ 		fl6.flowi6_mark = skb->mark;
+ 
++	/* try to find matching FMR */
++	for (fmr = t->parms.fmrs; fmr; fmr = fmr->next) {
++		unsigned mshift = 32 - fmr->ip4_prefix_len;
++		if (ntohl(fmr->ip4_prefix.s_addr) >> mshift ==
++				ntohl(iph->daddr) >> mshift)
++			break;
++	}
++
++	/* change dstaddr according to FMR */
++	if (fmr)
++		ip4ip6_fmr_calc(&fl6.daddr, iph, skb_tail_pointer(skb), fmr, true);
++
+ 	err = ip6_tnl_xmit2(skb, dev, dsfield, &fl6, encap_limit, &mtu);
+ 	if (err != 0) {
+ 		/* XXX: send ICMP error even if DF is not set. */
+@@ -1282,7 +1410,7 @@
+ ip6ip6_tnl_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+ 	struct ip6_tnl *t = netdev_priv(dev);
+-	struct ipv6hdr *ipv6h;
++	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
+ 	int encap_limit = -1;
+ 	__u16 offset;
+ 	struct flowi6 fl6;
+@@ -1290,12 +1418,7 @@
+ 	__u32 mtu;
+ 	u8 tproto;
+ 	int err;
+-	struct __ip6_tnl_fmr *fmr;
+ 
+-	if (unlikely(!pskb_may_pull(skb, sizeof(*ipv6h))))
+-		return -1;
+-
+-	ipv6h = ipv6_hdr(skb);
+ 	tproto = ACCESS_ONCE(t->parms.proto);
+ 	if ((tproto != IPPROTO_IPV6 && tproto != 0) ||
+ 	    ip6_tnl_addr_conflict(t, ipv6h))
+@@ -1319,24 +1442,12 @@
+ 
+ 	dsfield = ipv6_get_dsfield(ipv6h);
+ 	if (t->parms.flags & IP6_TNL_F_USE_ORIG_TCLASS)
+-		fl6.flowlabel |= (*(__be32 *) ipv6h & IPV6_TCLASS_MASK);
++		fl6.flowlabel |= net_hdr_word(ipv6h) & IPV6_TCLASS_MASK;
+ 	if (t->parms.flags & IP6_TNL_F_USE_ORIG_FLOWLABEL)
+ 		fl6.flowlabel |= ip6_flowlabel(ipv6h);
+ 	if (t->parms.flags & IP6_TNL_F_USE_ORIG_FWMARK)
+ 		fl6.flowi6_mark = skb->mark;
+ 
+-	/* try to find matching FMR */
+-	for (fmr = t->parms.fmrs; fmr; fmr = fmr->next) {
+-		unsigned mshift = 32 - fmr->ip4_prefix_len;
+-		if (ntohl(fmr->ip4_prefix.s_addr) >> mshift ==
+-				ntohl(ip_hdr(skb)->daddr) >> mshift)
+-			break;
+-	}
+-
+-	/* change dstaddr according to FMR */
+-	if (fmr)
+-		ip4ip6_fmr_calc(&fl6.daddr, ip_hdr(skb), skb_tail_pointer(skb), fmr, true);
+-
+ 	err = ip6_tnl_xmit2(skb, dev, dsfield, &fl6, encap_limit, &mtu);
+ 	if (err != 0) {
+ 		if (err == -EMSGSIZE)
+@@ -1459,7 +1570,7 @@
+ 	}
+ 	t->parms.fmrs = p->fmrs;
+ 
+-	dst_cache_reset(&t->dst_cache);
++	ip6_tnl_dst_reset(t);
+ 	ip6_tnl_link_config(t);
+ 	return 0;
+ }
+@@ -1731,7 +1842,7 @@
+ 	if (!dev->tstats)
+ 		return -ENOMEM;
+ 
+-	ret = dst_cache_init(&t->dst_cache, GFP_KERNEL);
++	ret = ip6_tnl_dst_init(t);
+ 	if (ret) {
+ 		free_percpu(dev->tstats);
+ 		dev->tstats = NULL;
+--- a/include/net/ip6_tunnel.h	2018-12-08 20:07:45.754484035 +0800
++++ b/include/net/ip6_tunnel.h	2018-12-02 21:27:08.780099059 +0800
+@@ -47,6 +45,12 @@
+ 	__be32			o_key;
+ };
+ 
++struct ip6_tnl_dst {
++	seqlock_t lock;
++	struct dst_entry __rcu *dst;
++	u32 cookie;
++};
++
+ /* IPv6 tunnel */
+ struct ip6_tnl {
+ 	struct ip6_tnl __rcu *next;	/* next tunnel in list */
+@@ -54,7 +58,7 @@
+ 	struct net *net;	/* netns for packet i/o */
+ 	struct __ip6_tnl_parm parms;	/* tunnel configuration parameters */
+ 	struct flowi fl;	/* flowi template for xmit */
+-	struct dst_cache dst_cache;	/* cached dst */
++	struct ip6_tnl_dst __percpu *dst_cache;	/* cached dst */
+ 
+ 	int err_count;
+ 	unsigned long err_time;
+@@ -74,6 +78,11 @@
+ 	__u8 encap_limit;	/* tunnel encapsulation limit   */
+ } __packed;
+ 
++struct dst_entry *ip6_tnl_dst_get(struct ip6_tnl *t);
++int ip6_tnl_dst_init(struct ip6_tnl *t);
++void ip6_tnl_dst_destroy(struct ip6_tnl *t);
++void ip6_tnl_dst_reset(struct ip6_tnl *t);
++void ip6_tnl_dst_set(struct ip6_tnl *t, struct dst_entry *dst);
+ int ip6_tnl_rcv_ctl(struct ip6_tnl *t, const struct in6_addr *laddr,
+ 		const struct in6_addr *raddr);
+ int ip6_tnl_xmit_ctl(struct ip6_tnl *t, const struct in6_addr *laddr,
+--- a/include/linux/types.h	2018-11-27 23:08:03.000000000 +0800
++++ b/include/linux/types.h	2018-11-26 16:33:51.356400228 +0800
+@@ -232,5 +232,11 @@
+ /* clocksource cycle base type */
+ typedef u64 cycle_t;
+ 
++struct net_hdr_word {
++       u32 words[1];
++} __attribute__((packed, aligned(2)));
++
++#define net_hdr_word(_p) (((struct net_hdr_word *) (_p))->words[0])
++
+ #endif /*  __ASSEMBLY__ */
+ #endif /* _LINUX_TYPES_H */
