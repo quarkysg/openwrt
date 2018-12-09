@@ -448,9 +448,15 @@
 			qcom,turbo-frequency;
 
 			qcom,ipv4-enabled;
+			qcom,ipv4-reasm-enabled;
 			qcom,ipv6-enabled;
+			qcom,ipv6-reasm-enabled;
 			qcom,l2tpv2-enabled;
 			qcom,gre-enabled;
+			qcom,gre-redir-enabled;
+			qcom,gre_tunnel_enabled;
+			qcom,ppe-enabled;
+			qcom,pppoe-enabled;
 			qcom,map-t-enabled;
 			qcom,pptp-enabled;
 			qcom,portid-enabled;
@@ -459,6 +465,8 @@
 			qcom,tunipip6-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,wlanredirect-enabled;
+			qcom,bridge-enabled;
+			qcom,vlan-enabled;
 		};
 
 		nss1: nss@40800000 {
