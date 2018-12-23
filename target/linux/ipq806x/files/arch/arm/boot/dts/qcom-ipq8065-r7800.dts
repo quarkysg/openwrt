@@ -499,8 +499,17 @@
 			reg-names = "nss_reg_base" , "qsgmii_reg_base", "clk_ctl_base";
 		};
 
+		msm-sps {
+			compatible = "qcom,msm_sps";
+			interrupts = <GIC_SPI 105 IRQ_TYPE_LEVEL_HIGH>;
+			reg = <0x12800000 0x4000 0x12240000 0x1000 0x12244000 0x4000>;
+			reg-name = "pipe_mem", "bamdma_dma", "bamdma_bam";
+			clocks = <&rpmcc RPM_DAYTONA_FABRIC_CLK>, <&gcc DMA_BAM_H_CLK>;
+			clock-names = "dfab_clk", "dma_bam_pclk";
+			qcom,bam-dma-res-pipes = <6>;
+		};
+
 		gmac1: ethernet@37200000 {
-			status = "ok";
 			status = "ok";
 			device_type = "network";
 			compatible = "qcom,nss-gmac";

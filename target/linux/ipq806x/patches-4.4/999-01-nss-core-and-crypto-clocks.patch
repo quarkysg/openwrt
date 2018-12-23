@@ -1559,3 +1559,17 @@
  
  	clk_disable_unprepare(adev->core_clk);
  	clk_disable_unprepare(adev->iface_clk);
+--- a/drivers/platform/Kconfig	2018-11-27 23:08:03.000000000 +0800
++++ /bdrivers/platform/Kconfig	2018-11-26 16:33:39.460400228 +0800
+@@ -9,3 +9,4 @@
+ endif
+ 
+ source "drivers/platform/chrome/Kconfig"
++source "drivers/platform/msm/Kconfig"
+--- a/drivers/platform/Makefile	2018-11-27 23:08:03.000000000 +0800
++++ b/drivers/platform/Makefile	2018-11-26 17:15:52.120400228 +0800
+@@ -7,3 +7,4 @@
+ obj-$(CONFIG_OLPC)		+= olpc/
+ obj-$(CONFIG_GOLDFISH)		+= goldfish/
+ obj-$(CONFIG_CHROME_PLATFORMS)	+= chrome/
++obj-$(CONFIG_ARCH_QCOM)		+= msm/
