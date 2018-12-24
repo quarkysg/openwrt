@@ -2607,7 +2607,7 @@ CONFIG_PACKAGE_kmod-bonding=y
 CONFIG_PACKAGE_kmod-bridge=y
 # CONFIG_PACKAGE_kmod-capi is not set
 # CONFIG_PACKAGE_kmod-dnsresolver is not set
-CONFIG_PACKAGE_kmod-fast-classifier=y
+# CONFIG_PACKAGE_kmod-fast-classifier is not set
 # CONFIG_PACKAGE_kmod-fast-classifier-noload is not set
 CONFIG_PACKAGE_kmod-gre=y
 # CONFIG_PACKAGE_kmod-gre6 is not set
@@ -3250,7 +3250,7 @@ CONFIG_OPENSSL_WITH_EC=y
 # CONFIG_OPENSSL_WITH_EC2M is not set
 # CONFIG_OPENSSL_WITH_SSL3 is not set
 CONFIG_OPENSSL_WITH_DEPRECATED=y
-# CONFIG_OPENSSL_WITH_DTLS is not set
+CONFIG_OPENSSL_WITH_DTLS=y
 # CONFIG_OPENSSL_WITH_COMPRESSION is not set
 CONFIG_OPENSSL_WITH_NPN=y
 CONFIG_OPENSSL_WITH_PSK=y
@@ -3990,6 +3990,7 @@ CONFIG_POSTFIX_CDB=y
 #
 # CONFIG_PACKAGE_coova-chilli is not set
 # CONFIG_PACKAGE_nodogsplash is not set
+# CONFIG_PACKAGE_nodogsplash2 is not set
 # CONFIG_PACKAGE_wifidog is not set
 # CONFIG_PACKAGE_wifidog-tls is not set
 
@@ -4284,6 +4285,7 @@ CONFIG_PACKAGE_ip-tiny=y
 # CONFIG_PACKAGE_mwan3 is not set
 # CONFIG_PACKAGE_nstat is not set
 # CONFIG_PACKAGE_olsrd is not set
+# CONFIG_PACKAGE_prince is not set
 # CONFIG_PACKAGE_quagga is not set
 # CONFIG_PACKAGE_relayd is not set
 # CONFIG_PACKAGE_smcroute is not set
@@ -4379,6 +4381,10 @@ CONFIG_PACKAGE_ip-tiny=y
 # CONFIG_PACKAGE_sipp is not set
 # CONFIG_PACKAGE_siproxd is not set
 # CONFIG_PACKAGE_yate is not set
+
+#
+# Telephony Lantiq
+#
 
 #
 # Time Synchronization
