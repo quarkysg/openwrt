@@ -108,6 +108,16 @@
 			};
 		};
 
+		watchdog@208a000 {
+			compatible = "qcom,kpss-wdt-ipq8064";
+			reg = <0x0208a000 0x100>;
+			reg-names = "kpss_wdt";
+			interrupt-names = "bark_irq";
+			interrupts = <0 3 0>;
+			timeout-sec = <10>;
+			clocks = <&sleep_clk>;
+		};
+
 		nss0: nss@40000000 {
 			compatible = "qcom,nss";
 			qcom,low-frequency = <110000000>;
