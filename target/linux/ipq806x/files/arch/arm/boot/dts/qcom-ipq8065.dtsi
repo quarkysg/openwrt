@@ -207,4 +207,42 @@
 			};
 		};
 	};
+
+	qcom,msm-imem@2a03f000 {
+		compatible = "qcom,msm-imem";
+		reg = <0x2a03f000 0x1000>; /* Address and size of IMEM */
+		ranges = <0x0 0x2A03F000 0x1000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		download_mode@0 {
+			compatible = "qcom,msm-imem-download_mode";
+			reg = <0x0 8>;
+
+			l2_dump_offset@14 {
+				compatible = "qcom,msm-imem-l2_dump_offset";
+				reg = <0x14 8>;
+			};
+		};
+
+		restart_reason@65c {
+			compatible = "qcom,msm-imem-restart_reason";
+			reg = <0x65c 4>;
+		};
+
+		l2_dump_offset@14 {
+			compatible = "qcom,msm-imem-l2_dump_offset";
+			reg = <0x14 8>;
+		};
+
+		qcom,cache_dump {
+			compatible        = "qcom,cache_dump";
+			qcom,l1-dump-size = <0x100000>;
+			qcom,l2-dump-size = <0x200000>;
+		};
+	};
+
+	qcom,restart_reason {
+		compatible        = "qcom,restart_reason";
+	};
 };
