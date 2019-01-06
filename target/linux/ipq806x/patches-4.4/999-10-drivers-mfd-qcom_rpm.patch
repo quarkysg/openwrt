@@ -1,0 +1,142 @@
+--- linux-openwrt/drivers/mfd/qcom_rpm.c	2019-01-05 14:14:10.240724584 +0800
++++ linux-msm/drivers/mfd/qcom_rpm.c	2018-11-26 16:33:32.116400228 +0800
+@@ -25,6 +25,8 @@
+ 
+ #include <dt-bindings/mfd/qcom-rpm.h>
+ 
++static u32 fw_version[3];
++
+ struct qcom_rpm_resource {
+ 	unsigned target_id;
+ 	unsigned status_id;
+@@ -42,6 +44,7 @@
+ 	unsigned int ack_sel_off;
+ 	unsigned int req_sel_size;
+ 	unsigned int ack_sel_size;
++	unsigned disable_mpm;
+ };
+ 
+ struct qcom_rpm {
+@@ -390,6 +393,7 @@
+ 	.ack_sel_off = 23,
+ 	.req_sel_size = 4,
+ 	.ack_sel_size = 7,
++	.disable_mpm = 1,
+ };
+ 
+ static const struct of_device_id qcom_rpm_of_match[] = {
+@@ -485,13 +489,23 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++static ssize_t fw_version_show(struct kobject *kobj,
++		struct kobj_attribute *attr, char *buf)
++{
++	return scnprintf(buf, PAGE_SIZE, "%u.%u.%u\n",
++			((fw_version[2] >> 24) & 0xff),
++			((fw_version[2] >> 16) & 0xff),
++			(fw_version[2] & 0xffff));
++}
++
++static struct kobj_attribute fw_version_attr = __ATTR_RO(fw_version);
++
+ static int qcom_rpm_probe(struct platform_device *pdev)
+ {
+ 	const struct of_device_id *match;
+ 	struct device_node *syscon_np;
+ 	struct resource *res;
+ 	struct qcom_rpm *rpm;
+-	u32 fw_version[3];
+ 	int irq_wakeup;
+ 	int irq_ack;
+ 	int irq_err;
+@@ -538,12 +552,20 @@
+ 	}
+ 
+ 	match = of_match_device(qcom_rpm_of_match, &pdev->dev);
++	if (!match || !match->data) {
++		dev_err(&pdev->dev, "match data missing\n");
++		return -EINVAL;
++	}
++
+ 	rpm->data = match->data;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	rpm->status_regs = devm_ioremap_resource(&pdev->dev, res);
+-	if (IS_ERR(rpm->status_regs))
++	if (IS_ERR(rpm->status_regs)) {
++		dev_err(&pdev->dev, "ioremap failed\n");
+ 		return PTR_ERR(rpm->status_regs);
++	}
++
+ 	rpm->ctrl_regs = rpm->status_regs + 0x400;
+ 	rpm->req_regs = rpm->status_regs + 0x600;
+ 
+@@ -579,17 +601,20 @@
+ 	fw_version[2] = readl(RPM_STATUS_REG(rpm, 2));
+ 	if (fw_version[0] != rpm->data->version) {
+ 		dev_err(&pdev->dev,
+-			"RPM version %u.%u.%u incompatible with driver version %u",
++			"RPM version %u.%u.%u:%u:%u incompatible with driver version %u",
+ 			fw_version[0],
+ 			fw_version[1],
+-			fw_version[2],
++			((fw_version[2] >> 24) & 0xff),
++			((fw_version[2] >> 16) & 0xff),
++			(fw_version[2] & 0xffff),
+ 			rpm->data->version);
+ 		return -EFAULT;
+ 	}
+ 
+-	dev_info(&pdev->dev, "RPM firmware %u.%u.%u\n", fw_version[0],
+-							fw_version[1],
+-							fw_version[2]);
++	dev_info(&pdev->dev, "RPM firmware %u.%u.%u\n",
++				((fw_version[2] >> 24) & 0xff),
++				((fw_version[2] >> 16) & 0xff),
++				(fw_version[2] & 0xffff));
+ 
+ 	ret = devm_request_irq(&pdev->dev,
+ 			       irq_ack,
+@@ -602,9 +627,11 @@
+ 		return ret;
+ 	}
+ 
+-	ret = irq_set_irq_wake(irq_ack, 1);
+-	if (ret)
+-		dev_warn(&pdev->dev, "failed to mark ack irq as wakeup\n");
++	if (!rpm->data->disable_mpm) {
++		ret = irq_set_irq_wake(irq_ack, 1);
++		if (ret)
++			dev_warn(&pdev->dev, "failed to mark ack irq as wakeup\n");
++	}
+ 
+ 	ret = devm_request_irq(&pdev->dev,
+ 			       irq_err,
+@@ -628,9 +655,15 @@
+ 		return ret;
+ 	}
+ 
+-	ret = irq_set_irq_wake(irq_wakeup, 1);
+-	if (ret)
+-		dev_warn(&pdev->dev, "failed to mark wakeup irq as wakeup\n");
++	if (!rpm->data->disable_mpm) {
++		ret = irq_set_irq_wake(irq_wakeup, 1);
++		if (ret)
++			dev_warn(&pdev->dev, "failed to mark wakeup irq as wakeup\n");
++	}
++
++	ret = sysfs_create_file(&pdev->dev.kobj, &fw_version_attr.attr);
++	if(ret)
++		dev_warn(&pdev->dev, "Failed to create fw_version sysfs entry\n");
+ 
+ 	return of_platform_populate(pdev->dev.of_node, NULL, NULL, &pdev->dev);
+ }
+@@ -639,6 +672,7 @@
+ {
+ 	struct qcom_rpm *rpm = dev_get_drvdata(&pdev->dev);
+ 
++	sysfs_remove_file(&pdev->dev.kobj, &fw_version_attr.attr);
+ 	of_platform_depopulate(&pdev->dev);
+ 	clk_disable_unprepare(rpm->ramclk);
+ 
