@@ -66,7 +66,7 @@
 		clocks = <&gcc NSS_CORE_CLK>, <&gcc NSSTCM_CLK>,
 			 <&rpmcc RPM_NSS_FABRIC_0_CLK>, <&rpmcc RPM_NSS_FABRIC_1_CLK>;
 		clock-names = "nss-core-clk", "nss-tcm-clk",
-			      "nss-fab0-clk", "nss-fab0-clk";
+			      "nss-fab0-clk", "nss-fab1-clk";
 		nss_core-supply = <&smb208_s1b>;
 		nss_core_vdd_nominal = <1100000>;
 		nss_core_vdd_high = <1150000>;
