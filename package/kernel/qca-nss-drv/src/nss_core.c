@@ -2312,22 +2312,10 @@ int32_t nss_core_send_buffer(struct nss_ctx_instance *nss_ctx, uint32_t if_num,
 	h2n_desc_ring->hlos_index = hlos_index;
 	if_map->h2n_hlos_index[qid] = hlos_index;
 
-#ifdef CONFIG_DEBUG_KMEMLEAK
 	/*
 	 * We are holding this skb in NSS FW, let kmemleak know about it.
-	 *
-	 * If the skb is a fast clone (FCLONE), then nbuf is pointing to the
-	 * cloned skb which is at the middle of the allocated block and kmemleak API
-	 * would backtrace if passed such a pointer. We will need to get to the original
-	 * skb pointer which kmemleak is aware of.
 	 */
-	if (nbuf->fclone == SKB_FCLONE_CLONE) {
-		kmemleak_not_leak(nbuf - 1);
-	} else {
-		kmemleak_not_leak(nbuf);
-	}
-#endif
-
+	kmemleak_not_leak(nbuf);
 	NSS_PKT_STATS_INCREMENT(nss_ctx, &nss_ctx->nss_top->stats_drv[NSS_STATS_DRV_NSS_SKB_COUNT]);
 
 	spin_unlock_bh(&h2n_desc_ring->lock);
