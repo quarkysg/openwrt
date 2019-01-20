@@ -42,7 +42,7 @@
  #endif
  
 +#ifdef CPTCFG_MAC80211_NSS_SUPPORT
-+	void *nssctx;
++	struct nss_virt_if_handle *nssctx;
 +#endif
 +
  	/* must be last, dynamically sized area in this! */
@@ -76,7 +76,7 @@
  
 +#ifdef CPTCFG_MAC80211_NSS_SUPPORT
 +	if (is_nss_enable) {
-+		sdata->nssctx = nss_create_virt_if(dev);
++		sdata->nssctx = nss_virt_if_create_sync(dev);
 +		if (sdata->nssctx)
 +			sdata_info(sdata, "Created a NSS virtual interface\n");
 +		else
@@ -94,7 +94,7 @@
  
 +#ifdef CPTCFG_MAC80211_NSS_SUPPORT
 +	if (sdata->nssctx) {
-+		nss_destroy_virt_if(sdata->nssctx);
++		nss_virt_if_destroy_sync(sdata->nssctx);
 +		sdata_info(sdata, "Destroyed NSS virtual interface\n");
 +	}
 +#endif
@@ -135,7 +135,7 @@
 +	if (!sdata->nssctx)
 +		goto out;
 +
-+	ret = nss_tx_virt_if_rxbuf(sdata->nssctx, skb);
++	ret = nss_virt_if_tx_buf(sdata->nssctx, skb);
 +	if (ret) {
 +		if (net_ratelimit()) {
 +			sdata_err(sdata, "NSS TX failed with error: %s\n",
