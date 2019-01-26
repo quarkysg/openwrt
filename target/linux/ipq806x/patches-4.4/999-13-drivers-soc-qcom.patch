@@ -1,0 +1,56 @@
+--- a/drivers/soc/qcom/Kconfig	2019-01-26 08:13:14.830456771 +0800
++++ b/drivers/soc/qcom/Kconfig	2019-01-26 08:17:13.430456771 +0800
+@@ -60,3 +60,30 @@
+ 	abnormal reboots. This also registers for panic notification so that
+ 	magic cookies can be set for download mode.
+ 	If unsure, say N
++
++config QCOM_DLOAD_MODE
++	bool "Enable download mode on crashes"
++	depends on ARCH_QCOM
++	default n
++	help
++	This makes the SoC enter download mode when it resets
++	due to a kernel panic. Note that this doesn't by itself
++	make the kernel reboot on a kernel panic - that must be
++	enabled via another mechanism.
++	If unsure, say N
++
++config QCOM_DLOAD_MODE_APPSBL
++	bool "Application bootloader based download mode handling"
++	depends on QCOM_DLOAD_MODE
++	default n
++	help
++
++config IPQ_SUBSYSTEM_RESTART
++	bool "IPQ Subsystem Restart"
++	help
++	  This option enables the IPQ subsystem restart framework.
++
++	  The IPQ subsystem restart framework provides support to boot,
++	  shutdown, and restart subsystems with a reference counted API.
++	  It also notifies userspace of transitions between these states via
++	  sysfs.
+--- a/drivers/soc/qcom/Makefile	2019-01-26 08:13:21.238456771 +0800
++++ b/drivers/soc/qcom/Makefile	2019-01-26 08:17:54.014456771 +0800
+@@ -4,3 +4,9 @@
+ obj-$(CONFIG_QCOM_SMD_RPM)	+= smd-rpm.o
+ obj-$(CONFIG_QCOM_SMEM) +=	smem.o
+ obj-$(CONFIG_QCOM_RESTART_REASON) += restart_reason.o
++
++ifdef CONFIG_IPQ_SUBSYSTEM_RESTART
++	obj-y += subsystem_notif.o
++	obj-y += subsystem_restart.o
++	obj-y += ramdump.o
++endif
+--- a/include/linux/dma-attrs.h	2018-11-27 23:08:03.000000000 +0800
++++ b/include/linux/dma-attrs.h	2019-01-14 22:01:03.540291839 +0800
+@@ -18,6 +18,8 @@
+ 	DMA_ATTR_NO_KERNEL_MAPPING,
+ 	DMA_ATTR_SKIP_CPU_SYNC,
+ 	DMA_ATTR_FORCE_CONTIGUOUS,
++	DMA_ATTR_STRONGLY_ORDERED,
++	DMA_ATTR_SKIP_ZEROING,
+ 	DMA_ATTR_MAX,
+ };
+ 
