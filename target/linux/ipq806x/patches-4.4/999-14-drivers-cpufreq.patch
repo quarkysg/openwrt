@@ -1,0 +1,32 @@
+--- a/drivers/cpufreq/Kconfig	2018-11-27 23:08:03.000000000 +0800
++++ b/drivers/cpufreq/Kconfig	2018-11-26 16:33:26.592400228 +0800
+@@ -198,6 +199,19 @@
+ 
+ 	  If in doubt, say N.
+ 
++config GENERIC_CPUFREQ_KRAIT
++	tristate "Krait cpufreq driver"
++	depends on HAVE_CLK && OF
++	# if CPU_THERMAL is on and THERMAL=m, CPU0 cannot be =y:
++	depends on !CPU_THERMAL || THERMAL
++	select PM_OPP
++	help
++	  This adds a generic cpufreq driver for CPU0 frequency management.
++	  It supports both uniprocessor (UP) and symmetric multiprocessor (SMP)
++	  systems which share clock and voltage across all CPUs.
++
++	  If in doubt, say N.
++
+ if X86
+ source "drivers/cpufreq/Kconfig.x86"
+ endif
+--- a/drivers/cpufreq/Makefile	2019-01-27 15:59:31.286953667 +0800
++++ b/drivers/cpufreq/Makefile	2018-11-26 16:33:26.592400228 +0800
+@@ -13,6 +13,7 @@
+ obj-$(CONFIG_CPU_FREQ_GOV_COMMON)		+= cpufreq_governor.o
+ 
+ obj-$(CONFIG_CPUFREQ_DT)		+= cpufreq-dt.o
++obj-$(CONFIG_GENERIC_CPUFREQ_KRAIT)	+= cpufreq-krait.o
+ 
+ ##################################################################################
+ # x86 drivers.

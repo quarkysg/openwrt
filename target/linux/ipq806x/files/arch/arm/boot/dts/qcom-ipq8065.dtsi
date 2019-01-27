@@ -6,6 +6,28 @@
 	model = "Qualcomm IPQ8065";
 	compatible = "qcom,ipq8065", "qcom,ipq8064";
 
+	cpus {
+		cpu@0 {
+			cpu_fab_threshold = <1000000000>;
+		};
+
+		cpu@1 {
+			cpu_fab_threshold = <1000000000>;
+		};
+
+		L2: l2-cache {
+			clocks = <&kraitcc 4>;
+			clock-names = "cache";
+			cache-points-kHz = <
+				/* kHz    uV    CPU kHz */
+				1200000 1150000 1200000
+				1000000 1100000  600000
+				 384000 1100000  384000
+			>;
+			vdd_dig-supply = <&smb208_s1a>;
+		};
+	};
+
 	qcom,pvs {
 		qcom,pvs-format-a;
 		qcom,speed0-pvs0-bin-v0 =
