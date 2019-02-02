@@ -19,12 +19,19 @@ c2600)
 	;;
 d7800 |\
 r7500 |\
-r7500v2 |\
+r7500v2)
+	ucidef_set_led_usbport "usb1" "USB 1" "${board}:white:usb1" "usb1-port1" "usb2-port1"
+	ucidef_set_led_usbport "usb2" "USB 2" "${board}:white:usb2" "usb3-port1" "usb4-port1"
+	ucidef_set_led_netdev "wan" "WAN" "${board}:white:wan" "eth0"
+	ucidef_set_led_ide "esata" "eSATA" "${board}:white:esata"
+	;;
 r7800)
 	ucidef_set_led_usbport "usb1" "USB 1" "${board}:white:usb1" "usb1-port1" "usb2-port1"
 	ucidef_set_led_usbport "usb2" "USB 2" "${board}:white:usb2" "usb3-port1" "usb4-port1"
 	ucidef_set_led_netdev "wan" "WAN" "${board}:white:wan" "eth0"
 	ucidef_set_led_ide "esata" "eSATA" "${board}:white:esata"
+	ucidef_set_led_wlan "wlan2g" "WLAN2G" "ath10k-phy1" "phy1tpt"
+	ucidef_set_led_wlan "wlan5g" "WLAN5G" "ath10k-phy0" "phy0tpt"
 	;;
 nbg6817)
 	ucidef_set_led_wlan "wlan2g" "WLAN2G" "$board:amber:wifi2g" "phy1tpt"
