@@ -62,7 +62,7 @@
 
 			led_pins: led_pins {
 				pins = "gpio7", "gpio8", "gpio9", "gpio22", "gpio23",
-					"gpio24","gpio26", "gpio53", "gpio64";
+					"gpio24","gpio26", "gpio53", "gpio64", "gpio67";
 				function = "gpio";
 				drive-strength = <2>;
 				bias-pull-down;
@@ -102,6 +102,15 @@
 				clk {
 					pins = "gpio1";
 					input-disable;
+				};
+			};
+
+			rgmii1_pins: rgmii1_pins {
+				mux {
+					pins = "gpio2";
+					function = "gpio";
+					drive-strength = <8>;
+					bias-disable;
 				};
 			};
 
@@ -411,6 +420,8 @@
 					0x1	0x5e	    /* VLAN1 Ports 1/2/3/4/6 */
 					0x2	0x21	    /* VLAN2 Ports 0/5 */
 				>;
+				link-polling-required = <0>;
+				link-intr-gpio = <2>;
 			};
 
 			phy4: ethernet-phy@4 {
@@ -445,18 +456,20 @@
 			qcom,num-irq = <2>;
 			qcom,num-queue = <2>;
 			qcom,load-addr = <0x40000000>;
-			qcom,turbo-frequency;
+			qcom,turbo-frequency = <1>;
 
 			qcom,ipv4-enabled;
+			qcom,ipv4-reasm-enabled;
 			qcom,ipv6-enabled;
+			qcom,ipv6-reasm-enabled;
 			qcom,l2tpv2-enabled;
 			qcom,gre-enabled;
 			qcom,map-t-enabled;
 			qcom,pptp-enabled;
-			qcom,portid-enabled;
 			qcom,shaping-enabled;
 			qcom,tun6rd-enabled;
 			qcom,tunipip6-enabled;
+			qcom,pppoe-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,wlanredirect-enabled;
 		};
@@ -477,11 +490,9 @@
 			qcom,num-irq = <2>;
 			qcom,load-addr = <0x40800000>;
 			qcom,num-queue = <2>;
-			qcom,turbo-frequency;
+			qcom,turbo-frequency = <1>;
 
-			qcom,capwap-enabled;
 			qcom,crypto-enabled;
-			qcom,dtls-enabled;
 			qcom,ipsec-enabled;
 		};
 
@@ -509,7 +520,7 @@
 			interrupts = <GIC_SPI 223 IRQ_TYPE_LEVEL_HIGH>;
 			phy-mode = "rgmii";
 			qcom,id = <1>;
-			qcom,pcs-chanid = <1>;
+			qcom,pcs-chanid = <0>;
 			qcom,phy-mdio-addr = <4>;
 			qcom,poll-required = <0>;
 			qcom,rgmii-delay = <1>;
@@ -540,7 +551,7 @@
 			interrupts = <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>;
 			phy-mode = "sgmii";
 			qcom,id = <2>;
-			qcom,pcs-chanid = <2>;
+			qcom,pcs-chanid = <1>;
 			qcom,phy-mdio-addr = <0>;	/* none */
 			qcom,poll-required = <0>;	/* no polling */
 			qcom,rgmii-delay = <0>;
