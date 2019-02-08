@@ -496,6 +496,7 @@
 
 		gmac1: ethernet@37200000 {
 			status = "ok";
+			compatible = "qcom,nss-gmac";
 			phy-mode = "rgmii";
 			qcom,id = <1>;
 			qcom,phy_mdio_addr = <4>;
@@ -527,6 +528,7 @@
 
 		gmac2: ethernet@37400000 {
 			status = "ok";
+			compatible = "qcom,nss-gmac";
 			phy-mode = "sgmii";
 			qcom,id = <2>;
 			qcom,phy_mdio_addr = <0>;	/* none */

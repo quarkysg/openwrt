@@ -1456,7 +1456,6 @@ static int nss_gmac_remove(struct platform_device *pdev)
 
 static struct of_device_id nss_gmac_dt_ids[] = {
 	{ .compatible =  "qcom,nss-gmac" },
-	{ .compatible =  "qcom,ipq806x-gmac" },
 	{},
 };
 MODULE_DEVICE_TABLE(of, nss_gmac_dt_ids);
