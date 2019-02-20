@@ -32,6 +32,50 @@
 +#define CRYPTO_AHB_RESET				161
  
  #endif
+--- a/include/linux/clk-provider.h	2019-02-19 22:51:03.275001000 +0800
++++ b/include/linux/clk-provider.h	2019-02-19 22:51:14.627001000 +0800
+@@ -31,6 +31,7 @@
+ #define CLK_SET_RATE_NO_REPARENT BIT(7) /* don't re-parent on rate change */
+ #define CLK_GET_ACCURACY_NOCACHE BIT(8) /* do not use the cached clk accuracy */
+ #define CLK_RECALC_NEW_RATES	BIT(9) /* recalc rates after notifications */
++#define CLK_IS_CRITICAL		BIT(11) /* do not gate, ever */
+ 
+ struct clk;
+ struct clk_hw;
+--- a/drivers/clk/clk.c	2019-02-19 22:56:22.898474682 +0800
++++ b/drivers/clk/clk.c	2019-02-19 23:00:38.008485712 +0800
+@@ -578,6 +578,9 @@
+ 	if (WARN_ON(core->prepare_count == 0))
+ 		return;
+ 
++	if (WARN_ON(core->prepare_count == 1 && core->flags & CLK_IS_CRITICAL))
++		return;
++
+ 	if (--core->prepare_count > 0)
+ 		return;
+ 
+@@ -683,6 +686,9 @@
+ 	if (WARN_ON(core->enable_count == 0))
+ 		return;
+ 
++	if (WARN_ON(core->enable_count == 1 && core->flags & CLK_IS_CRITICAL))
++		return;
++
+ 	if (--core->enable_count > 0)
+ 		return;
+ 
+@@ -2524,6 +2530,11 @@
+ 	if (core->ops->init)
+ 		core->ops->init(core->hw);
+ 
++	if (core->flags & CLK_IS_CRITICAL) {
++		clk_core_prepare(core);
++		clk_core_enable(core);
++	}
++
+ 	kref_init(&core->ref);
+ out:
+ 	clk_prepare_unlock();
 --- a/drivers/clk/qcom/Makefile	2018-03-31 11:26:20.819446000 +0800
 +++ b/drivers/clk/qcom/Makefile	2018-03-31 11:27:25.791446000 +0800
 @@ -13,11 +13,13 @@
@@ -568,3 +612,77 @@
  obj-$(CONFIG_GOLDFISH)		+= goldfish/
  obj-$(CONFIG_CHROME_PLATFORMS)	+= chrome/
 +obj-$(CONFIG_ARCH_QCOM)		+= msm/
+--- a/drivers/clk/qcom/gcc-ipq806x.c	2019-02-19 21:59:06.139001000 +0800
++++ b/drivers/clk/qcom/gcc-ipq806x.c	2019-02-19 22:09:14.883001000 +0800
+@@ -77,6 +77,7 @@
+ 		.parent_names = (const char *[]){ "pxo" },
+ 		.num_parents = 1,
+ 		.ops = &clk_pll_ops,
++		.flags = CLK_IS_CRITICAL,
+ 	},
+ };
+ 
+@@ -850,7 +851,7 @@
+ 			.parent_names = gcc_pxo_pll8,
+ 			.num_parents = 2,
+ 			.ops = &clk_rcg_ops,
+-			.flags = CLK_SET_PARENT_GATE,
++			.flags = CLK_SET_PARENT_GATE | CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
+@@ -866,7 +867,7 @@
+ 			.parent_names = (const char *[]){ "gsbi4_qup_src" },
+ 			.num_parents = 1,
+ 			.ops = &clk_branch_ops,
+-			.flags = CLK_SET_RATE_PARENT,
++			.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
+@@ -948,7 +949,7 @@
+ 			.parent_names = gcc_pxo_pll8,
+ 			.num_parents = 2,
+ 			.ops = &clk_rcg_ops,
+-			.flags = CLK_SET_PARENT_GATE,
++			.flags = CLK_SET_PARENT_GATE | CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
+@@ -1013,7 +1014,7 @@
+ 			.parent_names = (const char *[]){ "gsbi7_qup_src" },
+ 			.num_parents = 1,
+ 			.ops = &clk_branch_ops,
+-			.flags = CLK_SET_RATE_PARENT,
++			.flags = CLK_SET_RATE_PARENT | CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
+@@ -1334,6 +1335,7 @@
+ 	{  20210000, P_PLL8,  1, 1,  19 },
+ 	{  24000000, P_PLL8,  4, 1,   4 },
+ 	{  48000000, P_PLL8,  4, 1,   2 },
++	{  52000000, P_PLL8,  1, 2,  15 }, /* 51.2 Mhz */
+ 	{  64000000, P_PLL8,  3, 1,   2 },
+ 	{  96000000, P_PLL8,  4, 0,   0 },
+ 	{ 192000000, P_PLL8,  2, 0,   0 },
+@@ -2804,7 +2806,8 @@
+ 			.parent_names = gcc_pxo_pll8_pll14_pll18_pll0,
+ 			.num_parents = 5,
+ 			.ops = &clk_dyn_rcg_ops,
+-			.flags = CLK_SET_RATE_PARENT | CLK_GET_RATE_NOCACHE,
++			.flags = CLK_SET_RATE_PARENT | CLK_GET_RATE_NOCACHE |
++				 CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
+@@ -2857,7 +2860,8 @@
+ 			.parent_names = gcc_pxo_pll8_pll14_pll18_pll0,
+ 			.num_parents = 5,
+ 			.ops = &clk_dyn_rcg_ops,
+-			.flags = CLK_SET_RATE_PARENT | CLK_GET_RATE_NOCACHE,
++			.flags = CLK_SET_RATE_PARENT | CLK_GET_RATE_NOCACHE |
++				 CLK_IGNORE_UNUSED,
+ 		},
+ 	},
+ };
