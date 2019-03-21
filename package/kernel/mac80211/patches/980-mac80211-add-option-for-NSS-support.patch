@@ -135,7 +135,7 @@
 +	if (!sdata->nssctx)
 +		goto out;
 +
-+	ret = nss_virt_if_tx_buf(sdata->nssctx, skb);
++	ret = nss_tx_virt_if_rxbuf(sdata->nssctx, skb);
 +	if (ret) {
 +		if (net_ratelimit()) {
 +			sdata_err(sdata, "NSS TX failed with error: %s\n",
@@ -153,27 +153,18 @@
  /*
   * monitor mode reception
   *
-@@ -2238,7 +2281,7 @@
-		}
- 	}
- 
--#ifndef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
-+#if 1
- 	if (skb) {
- 		/* 'align' will only take the values 0 or 2 here since all
- 		 * frames are required to be aligned to 2-byte boundaries
-@@ -2270,8 +2319,13 @@
+@@ -2268,10 +2311,14 @@
+ 		/* deliver to local stack */
+ 		skb->protocol = eth_type_trans(skb, dev);
  		memset(skb->cb, 0, sizeof(skb->cb));
++#ifdef CPTCFG_MAC80211_NSS_SUPPORT
++		netif_rx_nss(sdata, skb);
++#else
  		if (rx->napi)
  			napi_gro_receive(rx->napi, skb);
--		else
-+		else {
-+#ifdef CPTCFG_MAC80211_NSS_SUPPORT
-+			netif_rx_nss(sdata, skb);
-+#else
+ 		else
  			netif_receive_skb(skb);
 +#endif
-+		}
  	}
  
  	if (xmit_skb) {
