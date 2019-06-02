@@ -444,6 +444,7 @@ struct ar8xxx_priv {
 	struct mutex mib_lock;
 	struct delayed_work mib_work;
 	u64 *mib_stats;
+	u32 mib_poll_interval;
 
 	struct list_head list;
 	unsigned int use_count;
@@ -494,6 +495,14 @@ int
 ar8xxx_sw_set_reset_mibs(struct switch_dev *dev,
 			 const struct switch_attr *attr,
 			 struct switch_val *val);
+int
+ar8xxx_sw_set_mib_poll_interval(struct switch_dev *dev,
+				const struct switch_attr *attr,
+				struct switch_val *val);
+int
+ar8xxx_sw_get_mib_poll_interval(struct switch_dev *dev,
+				const struct switch_attr *attr,
+				struct switch_val *val);
 int
 ar8xxx_sw_set_mirror_rx_enable(struct switch_dev *dev,
 			       const struct switch_attr *attr,
