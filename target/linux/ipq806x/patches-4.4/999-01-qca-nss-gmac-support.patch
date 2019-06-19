@@ -1,0 +1,58 @@
+--- a/drivers/net/ethernet/Kconfig	2019-01-17 20:50:59.693143039 +0800
++++ b/drivers/net/ethernet/Kconfig	2019-01-17 20:53:12.669143039 +0800
+@@ -13,6 +13,7 @@
+ 
+ config MDIO
+ 	tristate
++	default y
+ 
+ config SUNGEM_PHY
+ 	tristate
+--- a/drivers/net/phy/mdio-bitbang.c	2019-01-18 21:22:53.018001000 +0800
++++ b/drivers/net/phy/mdio-bitbang.c	2019-01-18 21:24:51.198001000 +0800
+@@ -17,6 +17,7 @@
+  * kind, whether express or implied.
+  */
+ 
++#include <linux/irqflags.h>
+ #include <linux/module.h>
+ #include <linux/mdio-bitbang.h>
+ #include <linux/types.h>
+@@ -156,7 +156,9 @@
+ {
+ 	struct mdiobb_ctrl *ctrl = bus->priv;
+ 	int ret, i;
++	long flags;
+ 
++	local_irq_save(flags);
+ 	if (reg & MII_ADDR_C45) {
+ 		reg = mdiobb_cmd_addr(ctrl, phy, reg);
+ 		mdiobb_cmd(ctrl, MDIO_C45_READ, phy, reg);
+@@ -181,13 +183,17 @@
+ 
+ 	ret = mdiobb_get_num(ctrl, 16);
+ 	mdiobb_get_bit(ctrl);
++	local_irq_restore(flags);
++
+ 	return ret;
+ }
+ 
+ static int mdiobb_write(struct mii_bus *bus, int phy, int reg, u16 val)
+ {
+ 	struct mdiobb_ctrl *ctrl = bus->priv;
+-
++	long flags;
++ 
++	local_irq_save(flags);
+ 	if (reg & MII_ADDR_C45) {
+ 		reg = mdiobb_cmd_addr(ctrl, phy, reg);
+ 		mdiobb_cmd(ctrl, MDIO_C45_WRITE, phy, reg);
+@@ -202,6 +208,8 @@
+ 
+ 	ctrl->ops->set_mdio_dir(ctrl, 0);
+ 	mdiobb_get_bit(ctrl);
++	local_irq_restore(flags);
++
+ 	return 0;
+ }
+ 
