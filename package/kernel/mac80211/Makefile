@@ -102,6 +102,7 @@ define KernelPackage/mac80211
   $(call KernelPackage/mac80211/Default)
   TITLE:=Linux 802.11 Wireless Networking Stack
   DEPENDS+= +kmod-cfg80211 +hostapd-common
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   KCONFIG:=\
 	CONFIG_AVERAGE=y
   FILES:= $(PKG_BUILD_DIR)/net/mac80211/mac80211.ko
@@ -110,6 +111,15 @@ endef
 
 define KernelPackage/mac80211/config
   if PACKAGE_kmod-mac80211
+
+    if PACKAGE_kmod-qca-nss-drv
+	config PACKAGE_MAC80211_NSS_SUPPORT
+		bool "Enable NSS support for IPQ platform"
+		default y
+		help
+		  This option enables support for NSS in boards
+		  like AP148.
+    endif
 
 	config PACKAGE_MAC80211_DEBUGFS
 		bool "Export mac80211 internals in DebugFS"
@@ -1485,6 +1495,8 @@ config-y:= \
 	WLAN_VENDOR_TI \
 	WLAN_VENDOR_ZYDAS \
 
+config-$(CONFIG_PACKAGE_MAC80211_NSS_SUPPORT) += MAC80211_NSS_SUPPORT
+
 config-$(call config_package,cfg80211) += CFG80211
 
 config-$(call config_package,mac80211) += MAC80211
@@ -1642,7 +1654,7 @@ config-$(CONFIG_LEDS_TRIGGERS) += MAC80211_LEDS B43_LEDS B43LEGACY_LEDS
 MAKE_OPTS:= -C "$(PKG_BUILD_DIR)" \
 	CROSS_COMPILE="$(KERNEL_CROSS)" \
 	ARCH="$(LINUX_KARCH)" \
-	EXTRA_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS)" \
+	EXTRA_CFLAGS="-I$(PKG_BUILD_DIR)/include $(IREMAP_CFLAGS) -I$(STAGING_DIR)/usr/include/qca-nss-drv" \
 	KLIB_BUILD="$(LINUX_DIR)" \
 	MODPROBE=true \
 	KLIB=$(TARGET_MODULES_DIR) \
