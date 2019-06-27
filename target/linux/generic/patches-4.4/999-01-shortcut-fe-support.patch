@@ -131,7 +131,7 @@
 +	bool "Enables kernel network stack path for Shortcut  Forwarding Engine"
 --- a/net/core/dev.c	2019-01-16 20:38:37.274933833 +0800
 +++ b/net/core/dev.c	2019-01-16 20:44:07.773594898 +0800
-@@ -2751,8 +2751,17 @@
+@@ -2773,8 +2773,17 @@
  	unsigned int len;
  	int rc;
  
@@ -149,7 +149,7 @@
  
  #ifdef CONFIG_ETHERNET_PACKET_MANGLE
  	if (!dev->eth_mangle_tx ||
-@@ -3855,6 +3864,11 @@
+@@ -3877,6 +3886,11 @@
  }
  EXPORT_SYMBOL_GPL(netdev_rx_handler_unregister);
  
@@ -161,7 +161,7 @@
  /*
   * Limit the use of PFMEMALLOC reserves to those protocols that implement
   * the special handling of PFMEMALLOC skbs.
-@@ -3897,6 +3911,9 @@
+@@ -3919,6 +3933,9 @@
  	bool deliver_exact = false;
  	int ret = NET_RX_DROP;
  	__be16 type;
@@ -171,7 +171,7 @@
  
  	net_timestamp_check(!netdev_tstamp_prequeue, skb);
  
-@@ -3923,6 +3940,16 @@
+@@ -3945,6 +3962,16 @@
  			goto out;
  	}
  
