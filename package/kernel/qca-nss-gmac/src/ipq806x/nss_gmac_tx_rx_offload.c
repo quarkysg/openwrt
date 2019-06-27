@@ -277,15 +277,6 @@ static inline int nss_gmac_rx(struct nss_gmac_dev *gmacdev, int budget)
 }
 
 /*
- * nss_gmac_tx_avail
- *	Returns the number of available TX descriptors
- */
-static uint32_t nss_gmac_tx_avail(struct nss_gmac_dev *gmacdev)
-{
-	return NSS_GMAC_TX_DESC_SIZE - gmacdev->busy_tx_desc;
-}
-
-/*
  * nss_gmac_process_tx_complete()
  *	Xmit complete, clear descriptor and free the skb
  */
@@ -341,11 +332,6 @@ static inline void nss_gmac_process_tx_complete(struct nss_gmac_dev *gmacdev)
 		nss_gmac_reset_tx_qptr(gmacdev);
 		busy--;
 	} while (busy > 0);
-
-	if (unlikely(netif_queue_stopped(gmacdev->netdev)) &&
-		    (nss_gmac_tx_avail(gmacdev) > NSS_GMAC_TX_THRESH))
-		netif_wake_queue(gmacdev->netdev);
-
 	spin_unlock(&gmacdev->slock);
 }
 
@@ -475,13 +461,8 @@ static int nss_gmac_slowpath_if_xmit(void *app_data, struct sk_buff *skb)
 	/*
 	 * We don't have enough tx descriptor for this pkt, return busy
 	 */
-	if ((NSS_GMAC_TX_DESC_SIZE - gmacdev->busy_tx_desc) < nfrags + 1) {
-		if (!netif_queue_stopped(netdev)) {
-			netif_stop_queue(netdev);
-			// pr_err("%s: TX descriptor ring full\n", __func__);
-		}
+	if ((NSS_GMAC_TX_DESC_SIZE - gmacdev->busy_tx_desc) < nfrags + 1)
 		return NETDEV_TX_BUSY;
-	}
 
 	/*
 	 * Most likely, it is not a fragmented pkt, optimize for that
@@ -537,19 +518,21 @@ static int nss_gmac_slowpath_if_pause_on_off(void *app_data, uint32_t pause_on)
 static void nss_gmac_slowpath_if_get_stats(void *app_data, struct nss_gmac_stats *stats)
 {
 	/* Test code added by quarkysg, 19 Jun 2019  */
-
 	struct net_device *netdev = (struct net_device *)app_data;
 	struct nss_gmac_dev *gmacdev = (struct nss_gmac_dev *)netdev_priv(netdev);
 
 	stats->rx_bytes = gmacdev->stats.rx_bytes;
 	stats->rx_packets = gmacdev->stats.rx_packets;
 	stats->rx_errors = gmacdev->stats.rx_errors;
+	stats->rx_overflow_errors = gmacdev->stats.rx_over_errors;
+	stats->rx_crc_errors = gmacdev->stats.rx_crc_errors;
+	stats->rx_missed = gmacdev->stats.rx_missed_errors;
 
 	stats->tx_bytes = gmacdev->stats.tx_bytes;
 	stats->tx_packets = gmacdev->stats.tx_packets;
 	stats->tx_errors = gmacdev->stats.tx_errors;
 	stats->tx_dropped = gmacdev->stats.tx_dropped;
-
+	stats->tx_collisions = gmacdev->stats.collisions;
 	/* End of test code by quarkysg, 19 Jun 2019 */
 }
 
