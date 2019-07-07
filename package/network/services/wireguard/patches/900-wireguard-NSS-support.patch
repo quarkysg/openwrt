@@ -1,0 +1,195 @@
+--- a/src/Kbuild	2019-07-07 10:36:49.330304005 +0800
++++ b/src/Kbuild	2019-07-07 10:37:25.608433999 +0800
+@@ -5,6 +5,7 @@
+ ccflags-y := -O3 -fvisibility=hidden
+ ccflags-$(CONFIG_WIREGUARD_DEBUG) += -DDEBUG -g
+ ccflags-y += -D'pr_fmt(fmt)=KBUILD_MODNAME ": " fmt'
++ccflags-$(WIREGUARD_NSS_SUPPORT) += -DWIREGUARD_NSS_SUPPORT
+ 
+ wireguard-y := main.o noise.o device.o peer.o timers.o queueing.o send.o receive.o socket.o peerlookup.o allowedips.o ratelimiter.o cookie.o netlink.o
+ 
+--- a/src/device.h	2019-07-07 10:36:34.474880004 +0800
++++ b/src/device.h	2019-07-07 13:32:37.229140561 +0800
+@@ -18,6 +18,10 @@
+ #include <linux/net.h>
+ #include <linux/ptr_ring.h>
+ 
++#ifdef WIREGUARD_NSS_SUPPORT
++#include <nss_api_if.h>
++#endif
++
+ struct wg_device;
+ 
+ struct multicore_worker {
+@@ -57,6 +61,10 @@ struct wg_device {
+ 	u32 fwmark;
+ 	u16 incoming_port;
+ 	bool have_creating_net_ref;
++
++#ifdef WIREGUARD_NSS_SUPPORT
++	struct nss_virt_if_handle *nssctx;
++#endif
+ };
+ 
+ int wg_device_init(void);
+--- a/src/device.c	2019-07-07 10:36:16.425860017 +0800
++++ b/src/device.c	2019-07-07 14:18:23.019170977 +0800
+@@ -24,6 +24,12 @@
+ #include <net/ip_tunnels.h>
+ #include <net/addrconf.h>
+ 
++#ifdef WIREGUARD_NSS_SUPPORT
++bool is_nss_enable = true;
++module_param(is_nss_enable, bool, 0644);
++MODULE_PARM_DESC(is_nss_enable, "NSS enable module param");
++#endif
++
+ static LIST_HEAD(device_list);
+ 
+ static int wg_open(struct net_device *dev)
+@@ -63,6 +69,19 @@ static int wg_open(struct net_device *de
+ 			wg_packet_send_keepalive(peer);
+ 	}
+ 	mutex_unlock(&wg->device_update_lock);
++
++#ifdef WIREGUARD_NSS_SUPPORT
++	if (is_nss_enable) {
++		wg->nssctx = nss_virt_if_create_sync(dev);
++		if (wg->nssctx)
++			net_info_ratelimited("%s: Created a NSS virtual interface\n", wg->dev->name);
++		else
++			net_err_ratelimited("%s: Failed to create a NSS virtual interface\n", wg->dev->name);
++	} else {
++		wg->nssctx = NULL;
++	}
++#endif
++
+ 	return 0;
+ }
+ 
+@@ -106,6 +125,20 @@ static int wg_stop(struct net_device *de
+ 	struct wg_device *wg = netdev_priv(dev);
+ 	struct wg_peer *peer;
+ 
++#ifdef WIREGUARD_NSS_SUPPORT
++	int ret;
++
++	if (wg->nssctx) {
++		ret = nss_virt_if_destroy_sync(wg->nssctx);
++		if (!ret) {
++			wg->nssctx = NULL;
++			net_info_ratelimited("%s: Destroyed NSS virtual interface\n", wg->dev->name);
++		}
++		else
++			net_err_ratelimited("%s: Failed to destroy NSS virtual interface with error [%d]!\n", wg->dev->name, ret);
++	}
++#endif
++
+ 	mutex_lock(&wg->device_update_lock);
+ 	list_for_each_entry(peer, &wg->peer_list, peer_list) {
+ 		wg_packet_purge_staged_packets(peer);
+@@ -132,6 +165,28 @@ static netdev_tx_t wg_xmit(struct sk_buf
+ 	u32 mtu;
+ 	int ret;
+ 
++#ifdef WIREGUARD_NSS_SUPPORT
++	/* Packets from NSS does not have valid protocol, priority and other
++	 * network stack values. Derive required parameters (priority
++	 * and network_header) from payload for QoS header.
++	 * XXX: Here the assumption is that packet are in 802.3 format.
++	 * As of now priority is handled only for IPv4 and IPv6.
++	 */
++	if (wg->nssctx && likely(!skb->protocol)) {
++		skb_set_network_header(skb, 14);
++		switch (((struct ethhdr *)skb->data)->h_proto) {
++			case htons(ETH_P_IP):
++				skb->priority = (ipv4_get_dsfield(ip_hdr(skb)) &
++						0xfc) >> 5;
++				break;
++			case htons(ETH_P_IPV6):
++				skb->priority = (ipv6_get_dsfield(ipv6_hdr(skb)) &
++						0xfc) >> 5;
++				break;
++		}
++	}
++#endif
++
+ 	if (unlikely(wg_skb_examine_untrusted_ip_hdr(skb) != skb->protocol)) {
+ 		ret = -EPROTONOSUPPORT;
+ 		net_dbg_ratelimited("%s: Invalid IP packet\n", dev->name);
+--- a/src/receive.c	2019-07-07 10:36:24.669979996 +0800
++++ b/src/receive.c	2019-07-07 13:52:07.829140561 +0800
+@@ -29,6 +29,13 @@ static void update_rx_stats(struct wg_pe
+ 	peer->rx_bytes += len;
+ 	u64_stats_update_end(&tstats->syncp);
+ 	put_cpu_ptr(tstats);
++
++#ifdef WIREGUARD_NSS_SUPPORT
++	if (likely(peer->device->nssctx)) {
++		peer->device->nssctx->stats.node_stats.rx_packets++;
++		peer->device->nssctx->stats.node_stats.rx_bytes += len;
++	}
++#endif
+ }
+ 
+ #define SKB_TYPE_LE32(skb) (((struct message_header *)(skb)->data)->type)
+@@ -423,6 +430,10 @@ static void wg_packet_consume_data_done(
+ 		net_dbg_ratelimited("%s: Failed to give packet to userspace from peer %llu (%pISpfsc)\n",
+ 				    dev->name, peer->internal_id,
+ 				    &peer->endpoint.addr);
++#ifdef WIREGUARD_NSS_SUPPORT
++		if (likely(peer->device->nssctx))
++			peer->device->nssctx->stats.node_stats.rx_dropped++;
++#endif
+ 	} else {
+ 		update_rx_stats(peer, message_data_len(len_before_trim));
+ 	}
+@@ -565,6 +576,28 @@ err_keypair:
+ 
+ void wg_packet_receive(struct wg_device *wg, struct sk_buff *skb)
+ {
++#ifdef WIREGUARD_NSS_SUPPORT
++	/* Packets from NSS does not have valid protocol, priority and other
++	 * network stack values. Derive required parameters (priority
++	 * and network_header) from payload for QoS header.
++	 * XXX: Here the assumption is that packet are in 802.3 format.
++	 * As of now priority is handled only for IPv4 and IPv6.
++	 */
++	if (wg->nssctx && likely(!skb->protocol)) {
++		skb_set_network_header(skb, 14);
++		switch (((struct ethhdr *)skb->data)->h_proto) {
++			case htons(ETH_P_IP):
++				skb->priority = (ipv4_get_dsfield(ip_hdr(skb)) &
++						0xfc) >> 5;
++				break;
++			case htons(ETH_P_IPV6):
++				skb->priority = (ipv6_get_dsfield(ipv6_hdr(skb)) &
++						0xfc) >> 5;
++				break;
++		}
++	}
++#endif
++
+ 	if (unlikely(prepare_skb_header(skb, wg) < 0))
+ 		goto err;
+ 	switch (SKB_TYPE_LE32(skb)) {
+--- a/src/socket.c	2019-07-07 10:36:43.231256010 +0800
++++ b/src/socket.c	2019-07-07 14:05:14.715170977 +0800
+@@ -189,8 +189,16 @@ int wg_socket_send_skb_to_peer(struct wg
+ 			    &peer->endpoint_cache);
+ 	else
+ 		dev_kfree_skb(skb);
+-	if (likely(!ret))
++	if (likely(!ret)) {
+ 		peer->tx_bytes += skb_len;
++
++#ifdef WIREGUARD_NSS_SUPPORT
++		if (likely(peer->device->nssctx)) {
++			peer->device->nssctx->stats.node_stats.tx_packets++;
++			peer->device->nssctx->stats.node_stats.tx_bytes += skb_len;
++		}
++#endif
++	}
+ 	read_unlock_bh(&peer->endpoint_lock);
+ 
+ 	return ret;

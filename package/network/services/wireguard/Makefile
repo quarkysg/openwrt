@@ -53,6 +53,7 @@ define Package/wireguard
   $(call Package/wireguard/Default)
   TITLE:=WireGuard meta-package
   DEPENDS:=+wireguard-tools +kmod-wireguard
+  MENU:=1
 endef
 
 include $(INCLUDE_DIR)/kernel-defaults.mk
@@ -62,8 +63,12 @@ include $(INCLUDE_DIR)/package-defaults.mk
 MAKE_PATH:=src/tools
 MAKE_VARS += PLATFORM=linux
 
+MAKE_OPTS:= EXTRA_CFLAGS="-I$(STAGING_DIR)/usr/include/qca-nss-drv"
+
 define Build/Compile
-	$(MAKE) $(KERNEL_MAKEOPTS) M="$(PKG_BUILD_DIR)/src" modules
+	$(MAKE) $(KERNEL_MAKEOPTS) $(MAKE_OPTS) M="$(PKG_BUILD_DIR)/src" \
+		$(strip WIREGUARD_NSS_SUPPORT=$(CONFIG_PACKAGE_WIREGUARD_NSS_SUPPORT)) \
+		modules
 	$(call Build/Compile/Default)
 endef
 
@@ -101,8 +106,22 @@ define KernelPackage/wireguard
   SUBMENU:=Network Support
   TITLE:=WireGuard kernel module
   DEPENDS:=+IPV6:kmod-udptunnel6 +kmod-udptunnel4
+  PKG_BUILD_DEPENDS+= PACKAGE_kmod-qca-nss-drv:kmod-qca-nss-drv
   FILES:= $(PKG_BUILD_DIR)/src/wireguard.$(LINUX_KMOD_SUFFIX)
   AUTOLOAD:=$(call AutoProbe,wireguard)
+endef
+
+define KernelPackage/wireguard/config
+  if PACKAGE_kmod-wireguard
+    if PACKAGE_kmod-qca-nss-drv
+      config PACKAGE_WIREGUARD_NSS_SUPPORT
+	bool "Enable NSS support for IPQ platform"
+	default y
+	help
+	  This option enables support for NSS in boards
+	  like AP148.
+    endif
+  endif
 endef
 
 define KernelPackage/wireguard/description
