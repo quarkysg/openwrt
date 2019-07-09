@@ -179,7 +179,7 @@
  /*
   * Determine initial path cost based on speed.
   * using recommendations from 802.1d standard
-@@ -533,6 +543,7 @@
+@@ -535,6 +539,7 @@
  	dev_set_mtu(br->dev, br_min_mtu(br));
  
  	kobject_uevent(&p->kobj, KOBJ_ADD);
@@ -187,7 +187,7 @@
  
  	return 0;
  
-@@ -570,6 +581,8 @@
+@@ -569,6 +574,8 @@
  	if (!p || p->br != br)
  		return -EINVAL;
  
@@ -196,7 +196,7 @@
  	/* Since more than one interface can be attached to a bridge,
  	 * there still maybe an alternate path for netconsole to use;
  	 * therefore there is no reason for a NETDEV_RELEASE event.
-@@ -598,6 +611,65 @@
+@@ -597,6 +604,65 @@
  		nbp_update_port_count(br);
  }
  
@@ -536,7 +536,7 @@
  }
  
  /* bond_mii_monitor
-@@ -3097,6 +3185,40 @@
+@@ -3101,6 +3195,40 @@
  }
  
  /* Extract the appropriate headers based on bond's xmit policy */
@@ -577,7 +577,7 @@
  static bool bond_flow_dissect(struct bonding *bond, struct sk_buff *skb,
  			      struct flow_keys *fk)
  {
-@@ -3757,6 +3884,179 @@
+@@ -3761,6 +3889,179 @@
  	return NETDEV_TX_OK;
  }
  
@@ -757,7 +757,7 @@
  /* Use this to update slave_array when (a) it's not appropriate to update
   * slave_array right away (note that update_slave_array() may sleep)
   * and / or (b) RTNL is not held.
-@@ -3884,19 +4184,21 @@
+@@ -3888,19 +4189,21 @@
  static int bond_3ad_xor_xmit(struct sk_buff *skb, struct net_device *dev)
  {
  	struct bonding *bond = netdev_priv(dev);
@@ -790,7 +790,7 @@
  	return NETDEV_TX_OK;
  }
  
-@@ -3992,8 +4294,9 @@
+@@ -3996,8 +4299,9 @@
  		return bond_xmit_roundrobin(skb, dev);
  	case BOND_MODE_ACTIVEBACKUP:
  		return bond_xmit_activebackup(skb, dev);
@@ -801,7 +801,7 @@
  		return bond_3ad_xor_xmit(skb, dev);
  	case BOND_MODE_BROADCAST:
  		return bond_xmit_broadcast(skb, dev);
-@@ -4001,6 +4304,8 @@
+@@ -4005,6 +4309,8 @@
  		return bond_alb_xmit(skb, dev);
  	case BOND_MODE_TLB:
  		return bond_tlb_xmit(skb, dev);
@@ -810,7 +810,7 @@
  	default:
  		/* Should never happen, mode already checked */
  		netdev_err(dev, "Unknown bonding mode %d\n", BOND_MODE(bond));
-@@ -4118,6 +4423,10 @@
+@@ -4122,6 +4428,10 @@
  	struct bonding *bond = netdev_priv(bond_dev);
  	if (bond->wq)
  		destroy_workqueue(bond->wq);
@@ -821,7 +821,7 @@
  	free_netdev(bond_dev);
  }
  
-@@ -4195,10 +4504,30 @@
+@@ -4199,10 +4509,30 @@
  	list_del(&bond->bond_list);
  
  	bond_debug_unregister(bond);
@@ -852,7 +852,7 @@
  static int bond_check_params(struct bond_params *params)
  {
  	int arp_validate_value, fail_over_mac_value, primary_reselect_value, i;
-@@ -4327,6 +4656,19 @@
+@@ -4331,6 +4661,19 @@
  		all_slaves_active = 0;
  	}
  
@@ -872,7 +872,7 @@
  	if (resend_igmp < 0 || resend_igmp > 255) {
  		pr_warn("Warning: resend_igmp (%d) should be between 0 and 255, resetting to %d\n",
  			resend_igmp, BOND_DEFAULT_RESEND_IGMP);
-@@ -4596,9 +4938,19 @@
+@@ -4600,9 +4943,19 @@
  {
  	struct bonding *bond = netdev_priv(bond_dev);
  	struct bond_net *bn = net_generic(dev_net(bond_dev), bond_net_id);
@@ -892,7 +892,7 @@
  	bond->wq = create_singlethread_workqueue(bond_dev->name);
  	if (!bond->wq)
  		return -ENOMEM;
-@@ -4665,6 +5017,14 @@
+@@ -4669,6 +5022,14 @@
  	rtnl_unlock();
  	if (res < 0)
  		bond_destructor(bond_dev);
@@ -907,7 +907,7 @@
  	return res;
  }
  
-@@ -4725,6 +5085,10 @@
+@@ -4729,6 +5090,10 @@
  	if (res)
  		goto err_link;
  
@@ -918,7 +918,7 @@
  	bond_create_debugfs();
  
  	for (i = 0; i < max_bonds; i++) {
-@@ -4738,6 +5102,8 @@
+@@ -4742,6 +5107,8 @@
  	return res;
  err:
  	bond_destroy_debugfs();
@@ -927,7 +927,7 @@
  	bond_netlink_fini();
  err_link:
  	unregister_pernet_subsys(&bond_net_ops);
-@@ -4751,6 +5117,7 @@
+@@ -4755,6 +5122,7 @@
  
  	bond_destroy_debugfs();
  
@@ -1025,7 +1025,7 @@
  	}
  }
  
-@@ -2516,6 +2577,102 @@
+@@ -2519,6 +2580,102 @@
  	return ret;
  }
  
@@ -1465,7 +1465,7 @@
  static inline __be16 vlan_proto(const struct sk_buff *skb)
  {
  	if (skb_vlan_tag_present(skb))
-@@ -975,6 +984,13 @@
+@@ -971,6 +982,13 @@
  		.maxlen		= sizeof(int),
  		.mode		= 0644,
  		.proc_handler	= brnf_sysctl_call_tables,

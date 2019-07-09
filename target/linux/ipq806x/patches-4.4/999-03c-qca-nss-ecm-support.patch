@@ -72,7 +72,7 @@
  		       net, sk, skb, NULL, skb->dev,
  		       br_dev_queue_push_xmit);
  
-@@ -97,7 +98,7 @@
+@@ -96,7 +97,7 @@
  		return;
  	}
  
@@ -81,7 +81,7 @@
  		dev_net(skb->dev), NULL, skb,NULL, skb->dev,
  		br_forward_finish);
  }
-@@ -121,7 +122,7 @@
+@@ -120,7 +121,7 @@
  	skb->dev = to->dev;
  	skb_forward_csum(skb);
  
@@ -90,7 +90,7 @@
  		dev_net(indev), NULL, skb, indev, skb->dev,
  		br_forward_finish);
  }
-@@ -136,7 +137,6 @@
+@@ -135,7 +136,6 @@
  
  	kfree_skb(skb);
  }
@@ -98,7 +98,7 @@
  
  /* called with rcu_read_lock */
  void br_forward(const struct net_bridge_port *to, struct sk_buff *skb, struct sk_buff *skb0)
-@@ -271,6 +271,7 @@
+@@ -270,6 +270,7 @@
  {
  	br_flood(br, skb, NULL, __br_deliver, unicast, false);
  }
@@ -106,7 +106,7 @@
  
  /* called under bridge lock */
  void br_flood_forward(struct net_bridge *br, struct sk_buff *skb,
-@@ -278,6 +279,7 @@
+@@ -277,6 +278,7 @@
  {
  	br_flood(br, skb, skb2, __br_forward, unicast, true);
  }

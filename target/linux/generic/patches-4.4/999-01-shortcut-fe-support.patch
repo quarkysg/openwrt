@@ -1,6 +1,6 @@
 --- a/include/linux/skbuff.h	2019-01-16 20:16:08.325745306 +0800
 +++ b/include/linux/skbuff.h	2019-01-16 20:31:47.288028493 +0800
-@@ -643,7 +643,12 @@
+@@ -648,7 +648,12 @@
  	__u8			inner_protocol_type:1;
  	__u8			remcsum_offload:1;
  	__u8			gro_skip:1;
@@ -215,7 +215,7 @@
     connections. */
 --- a/net/bridge/br_if.c	2019-01-16 20:54:51.919367044 +0800
 +++ b/net/bridge/br_if.c	2019-01-16 20:55:53.812401263 +0800
-@@ -597,3 +597,26 @@
+@@ -596,3 +596,26 @@
  	if (mask & BR_AUTO_MASK)
  		nbp_update_port_count(br);
  }
