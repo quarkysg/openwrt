@@ -293,6 +293,24 @@ define Device/lenovo_newifi-d1
 endef
 TARGET_DEVICES += lenovo_newifi-d1
 
+define Device/linksys_ea7500ahv2
+  MTK_SOC := mt7621
+  BLOCKSIZE := 128k
+  PAGESIZE := 2048
+  KERNEL_SIZE := 4096k
+  UBINIZE_OPTS := -E 5
+  IMAGE_SIZE := 36000k
+  IMAGES := factory.bin sysupgrade.bin
+  IMAGE/factory.bin := append-kernel | pad-to $$$${KERNEL_SIZE} | append-ubi | linksys-image type=EA7500v2 | check-size $$$$(IMAGE_SIZE)
+  DEVICE_VENDOR := Linksys
+  DEVICE_MODEL := EA7500-AH
+  DEVICE_VARIANT := v2
+  DEVICE_PACKAGES := \
+        kmod-usb2 kmod-usb3 kmod-mt7615e wpad-basic
+  SUPPORTED_DEVICES += ea7500ahv2
+endef
+TARGET_DEVICES += linksys_ea7500ahv2
+
 define Device/linksys_re6500
   MTK_SOC := mt7621
   IMAGE_SIZE := 7872k

@@ -1,0 +1,156 @@
+/dts-v1/;
+
+#include "mt7621.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	compatible = "linksys,ea7500ahv2", "mediatek,mt7621-soc";
+	model = "Linksys EA7500-AH v2";
+
+	chosen {
+		bootargs = "console=ttyS0,115200";
+	};
+
+	aliases {
+		led-boot = &status;
+		led-failsafe = &status;
+		led-running = &status;
+		led-upgrade = &status;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		
+		status: status {
+			label = "ea7500ahv2:white:status";
+			gpios = <&gpio0 10 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	keys {
+		compatible = "gpio-keys";
+
+		reset {
+			label = "reset";
+			gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_RESTART>;
+		};
+	};
+};
+
+&gdma {
+	status = "okay";
+};
+
+&hsdma {
+	status = "okay";
+};
+
+&nand {
+	status = "okay";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "boot";
+			reg = <0x00000000 0x00080000>;
+			read-only;
+		};
+
+		partition@00080000 {
+			label = "u_env";
+			reg = <0x00080000 0x00040000>;
+			read-only;
+		};
+
+		factory: partition@000c0000 {
+			label = "factory";
+			reg = <0x000c0000 0x00040000>;
+			read-only;
+		};
+
+		partition@00100000 {
+			label = "s_env";
+			reg = <0x00100000 0x00040000>;
+			read-only;
+		};
+
+		devinfo: partition@00140000 {
+			label = "devinfo";
+			reg = <0x00140000 0x00040000>;
+			read-only;
+		};
+
+		partition@00180000 {
+			label = "kernel";
+			reg = <0x00180000 0x00400000>;
+		};
+
+		partition@00580000 {
+			label = "ubi";
+			reg = <0x00580000 0x02400000>;
+		};
+
+		partition@02980000 {
+			label = "alt_kernel";
+			reg = <0x02980000 0x00400000>;
+			read-only;
+		};
+
+		partition@02d80000 {
+			label = "alt_rootfs";
+			reg = <0x02d80000 0x02400000>;
+			read-only;
+		};
+
+		partition@05180000 {
+			label = "sysdiag";
+			reg = <0x05180000 0x00100000>;
+			read-only;
+		};
+
+		partition@05280000 {
+			label = "syscfg";
+			reg = <0x05280000 0x02d00000>;
+		};
+	};
+};
+
+&pcie {
+	status = "okay";
+};
+
+&pcie0 {
+	wifi@0,0 {
+		compatible = "pci14c3,7615";
+		reg = <0x0000 0 0 0 0>;
+		mediatek,mtd-eeprom = <&factory 0x0000>;
+	};
+};
+
+&pcie1 {
+	wifi@0,0 {
+		compatible = "pci14c3,7615";
+		reg = <0x0000 0 0 0 0>;
+		mediatek,mtd-eeprom = <&factory 0x8000>;
+		ieee80211-freq-limit = <5000000 6000000>;
+	};
+};
+
+&ethernet {
+	mediatek,portmap = "wllll";
+};
+
+&pinctrl {
+	state_default: pinctrl0 {
+		gpio {
+			ralink,group = "jtag", "uart2", "uart3", "wdt";
+			ralink,function = "gpio";
+		};
+	};
+};
