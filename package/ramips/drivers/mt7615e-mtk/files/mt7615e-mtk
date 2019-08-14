@@ -1,0 +1,104 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+. /lib/functions/system.sh
+
+START=99
+MODNAME=mt7615e_mtk
+MOD_INTERFACES="ra0 rai0"
+UCI_IFPROP="network.lan.ifname"
+
+reverse_word_order() {
+    local result=
+    for word in ${@}; do
+        result="${word} ${result}"
+    done
+    echo "${result}"
+}
+
+wait_if_down() {
+  local ifname=${1}
+
+  while /sbin/ifconfig | grep -q ^${ifname}
+  do
+    echo "waiting for ${ifname} to turn off..."
+    sleep 1
+  done
+}
+
+prepare_eeprom() {
+  if [ ! -f /lib/firmware/mt7615_eeprom.bin ]; then
+    mac_addr=$(mtd_get_mac_ascii devinfo hw_mac_addr)
+    mac_addr_hex_str=$(echo "${mac_addr//:}")
+    mac_addr_dec=$((0x${mac_addr_hex_str}))
+    mac_addr_hex_str_2g=$(printf "%x" $((mac_addr_dec+1)))
+    mac_addr_hex_str_5g=$(printf "%x" $((mac_addr_dec+2)))
+    mac_full_2g_esp=$(echo -n -e "${mac_addr_hex_str_2g}" | sed -e 's/../\\x&/g')
+    mac_full_5g_esp=$(echo -n -e "${mac_addr_hex_str_5g}" | sed -e 's/../\\x&/g')
+
+    dd if=/dev/`grep -i factory /proc/mtd | cut -d : -f 1` of=/lib/firmware/mt7615_eeprom.bin bs=64k count=1
+
+    printf ${mac_full_2g_esp} | dd of=/lib/firmware/mt7615_eeprom.bin bs=1 seek=4 count=6 conv=notrunc
+    printf ${mac_full_5g_esp} | dd of=/lib/firmware/mt7615_eeprom.bin bs=1 seek=32772 count=6 conv=notrunc
+  fi
+}
+
+set_cpu_affinity() {
+  intr=`grep ${1} /proc/interrupts | cut -d : -f 1 | sed -e 's/^[ \t]*//'`
+
+  if [ "ra0" == "${i}" ]                   
+  then                                     
+    echo 4 > /proc/irq/${intr}/smp_affinity          
+                                                     
+    echo Configured interface[${1}]-intr[${intr}] to smp_affinity[4].
+  elif [ "rai0" == "${i}" ]                
+  then                                     
+    echo 8 > /proc/irq/${intr}/smp_affinity          
+                                                     
+    echo Configured interface[${1}]-intr[${intr}] to smp_affinity[8].
+  fi
+}
+
+start() {
+  commit=false
+
+  prepare_eeprom
+
+  if [ -z "`lsmod | grep ${MODNAME}`" ]
+  then
+      /sbin/modprobe ${MODNAME}
+  fi
+
+  for i in ${MOD_INTERFACES}
+  do
+    /sbin/ifconfig ${i} up
+    set_cpu_affinity ${i}
+    /usr/sbin/brctl addif br-lan ${i}
+    if [ -z "`/sbin/uci get ${UCI_IFPROP} | grep ${i}`" ]
+    then
+      /sbin/uci set ${UCI_IFPROP}="`/sbin/uci get ${UCI_IFPROP}` ${i}"
+      commit=true
+    fi
+  done
+
+  if [ "${commit}" == true ]
+  then
+    /sbin/uci commit
+  fi
+}
+
+stop() {
+  local reverse_interfaces=$(reverse_word_order $MOD_INTERFACES)
+  for i in ${reverse_interfaces}
+    do
+    /usr/sbin/brctl delif br-lan ${i}
+    sleep 2
+    /sbin/ifconfig ${i} down
+    wait_if_down ${i}
+  done
+}
+
+reload() {
+  stop
+  start
+}
