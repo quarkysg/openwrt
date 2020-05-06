@@ -821,6 +821,7 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 	struct nf_conntrack_tuple orig_tuple;
 	struct nf_conntrack_tuple reply_tuple;
 	struct sfe_connection *conn;
+	struct sk_buff *tmp_skb = NULL;
 
 	/*
 	 * Don't process broadcast or multicast packets.
@@ -1105,7 +1106,10 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 	}
 	dev_put(dev);
 
-	if (!fast_classifier_find_dev_and_mac_addr(NULL, &sic.dest_ip, &dev, sic.dest_mac, is_v4)) {
+	if (unlikely(!is_v4))
+		tmp_skb = skb;
+
+	if (!fast_classifier_find_dev_and_mac_addr(tmp_skb, &sic.dest_ip, &dev, sic.dest_mac, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_DEST_DEV);
 		goto done1;
 	}
