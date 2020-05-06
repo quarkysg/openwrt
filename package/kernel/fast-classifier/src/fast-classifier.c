@@ -316,13 +316,22 @@ rx_exit:
  * structure, obtain the hardware address.  This means this function also
  * works if the neighbours are routers too.
  */
-static bool fast_classifier_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct net_device **dev, u8 *mac_addr, bool is_v4)
+static bool fast_classifier_find_dev_and_mac_addr(struct sk_buff *skb, sfe_ip_addr_t *addr, struct net_device **dev, u8 *mac_addr, bool is_v4)
 {
 	struct neighbour *neigh;
 	struct rtable *rt;
 	struct rt6_info *rt6;
 	struct dst_entry *dst;
 	struct net_device *mac_dev;
+
+	/*
+	 * If we have skb provided, use it as the original code is unable
+	 * to lookup routes that are policy routed.
+	*/
+	if (unlikely(skb)) {
+		dst = skb_dst(skb);
+		goto skip_dst_lookup;
+	}
 
 	/*
 	 * Look up the rtable entry for the IP address then get the hardware
@@ -349,18 +358,23 @@ static bool fast_classifier_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct ne
 		dst = (struct dst_entry *)rt6;
 	}
 
+skip_dst_lookup:
 	rcu_read_lock();
 	neigh = sfe_dst_get_neighbour(dst, addr);
 	if (unlikely(!neigh)) {
 		rcu_read_unlock();
-		dst_release(dst);
+		if (likely(!skb))
+			dst_release(dst);
+
 		goto ret_fail;
 	}
 
 	if (unlikely(!(neigh->nud_state & NUD_VALID))) {
 		rcu_read_unlock();
 		neigh_release(neigh);
-		dst_release(dst);
+		if (likely(!skb))
+			dst_release(dst);
+
 		goto ret_fail;
 	}
 
@@ -368,7 +382,9 @@ static bool fast_classifier_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct ne
 	if (!mac_dev) {
 		rcu_read_unlock();
 		neigh_release(neigh);
-		dst_release(dst);
+		if (likely(!skb))
+			dst_release(dst);
+
 		goto ret_fail;
 	}
 
@@ -378,7 +394,8 @@ static bool fast_classifier_find_dev_and_mac_addr(sfe_ip_addr_t *addr, struct ne
 	*dev = mac_dev;
 	rcu_read_unlock();
 	neigh_release(neigh);
-	dst_release(dst);
+	if (likely(!skb))
+		dst_release(dst);
 
 	return true;
 
@@ -964,6 +981,21 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 		sic.dest_port = orig_tuple.dst.u.udp.port;
 		sic.src_port_xlate = reply_tuple.dst.u.udp.port;
 		sic.dest_port_xlate = reply_tuple.src.u.udp.port;
+
+		/*
+		 * Somehow, SFE is not playing nice with IPSec traffic.
+		 * Do not accelerate for now.
+		 */
+		if (ntohs(sic.dest_port) == 4500 || ntohs(sic.dest_port) == 500) {
+			if (likely(is_v4))
+				DEBUG_TRACE("quarkysg:: IPsec bypass: %pI4:%d(%pI4:%d) to %pI4:%d(%pI4:%d)\n",
+					&sic.src_ip.ip, ntohs(sic.src_port), &sic.src_ip_xlate.ip, ntohs(sic.src_port_xlate),
+					&sic.dest_ip.ip, ntohs(sic.dest_port), &sic.dest_ip_xlate.ip, ntohs(sic.dest_port_xlate));
+			else
+				DEBUG_TRACE("quarkysg:: IPsec bypass: %pI6:%d to %pI6:%d\n",
+					&sic.src_ip.ip6, ntohs(sic.src_port), &sic.dest_ip.ip6, ntohs(sic.dest_port));
+			return NF_ACCEPT;
+		}
 		break;
 
 	default:
@@ -1061,25 +1093,25 @@ static unsigned int fast_classifier_post_routing(struct sk_buff *skb, bool is_v4
 	 * Get the net device and MAC addresses that correspond to the various source and
 	 * destination host addresses.
 	 */
-	if (!fast_classifier_find_dev_and_mac_addr(&sic.src_ip, &src_dev_tmp, sic.src_mac, is_v4)) {
+	if (!fast_classifier_find_dev_and_mac_addr(NULL, &sic.src_ip, &src_dev_tmp, sic.src_mac, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_SRC_DEV);
 		return NF_ACCEPT;
 	}
 	src_dev = src_dev_tmp;
 
-	if (!fast_classifier_find_dev_and_mac_addr(&sic.src_ip_xlate, &dev, sic.src_mac_xlate, is_v4)) {
+	if (!fast_classifier_find_dev_and_mac_addr(NULL, &sic.src_ip_xlate, &dev, sic.src_mac_xlate, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_SRC_XLATE_DEV);
 		goto done1;
 	}
 	dev_put(dev);
 
-	if (!fast_classifier_find_dev_and_mac_addr(&sic.dest_ip, &dev, sic.dest_mac, is_v4)) {
+	if (!fast_classifier_find_dev_and_mac_addr(NULL, &sic.dest_ip, &dev, sic.dest_mac, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_DEST_DEV);
 		goto done1;
 	}
 	dev_put(dev);
 
-	if (!fast_classifier_find_dev_and_mac_addr(&sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4)) {
+	if (!fast_classifier_find_dev_and_mac_addr(skb, &sic.dest_ip_xlate, &dest_dev_tmp, sic.dest_mac_xlate, is_v4)) {
 		fast_classifier_incr_exceptions(FAST_CL_EXCEPTION_NO_DEST_XLATE_DEV);
 		goto done1;
 	}
@@ -1707,7 +1739,7 @@ static int __init fast_classifier_init(void)
 	struct fast_classifier *sc = &__sc;
 	int result = -1;
 
-	printk(KERN_ALERT "fast-classifier: starting up\n");
+	printk(KERN_ALERT "fast-classifier (PBR safe v2.1.3b): starting up\n");
 	DEBUG_INFO("SFE CM init\n");
 
 	hash_init(fc_conn_ht);
