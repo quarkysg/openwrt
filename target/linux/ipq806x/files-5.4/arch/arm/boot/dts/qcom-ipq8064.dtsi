@@ -1345,6 +1345,12 @@
 			status = "disabled";
 		};
 
+		nss-gmac-common {
+			compatible = "qcom,nss-gmac-common";
+			reg = <0x03000000 0x0000FFFF 0x1bb00000 0x0000FFFF 0x00900000 0x00004000>;
+			reg-names = "nss_reg_base", "qsgmii_reg_base", "clk_ctl_base";
+		};
+
 		gmac0: ethernet@37000000 {
 			device_type = "network";
 			compatible = "qcom,ipq806x-gmac";
