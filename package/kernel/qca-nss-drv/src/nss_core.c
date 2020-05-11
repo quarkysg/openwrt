@@ -1860,6 +1860,10 @@ static inline bool nss_skb_can_recycle(struct nss_ctx_instance *nss_ctx,
 #endif
 
 #ifdef CONFIG_BRIDGE_NETFILTER
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+	if (unlikely(skb_ext_exist(nbuf, SKB_EXT_BRIDGE_NF)))
+		return false;
+#else
 	/*
 	 * This check is added to avoid deadlock from nf_bridge
 	 * when ecm is trying to flush a rule.
@@ -1867,6 +1871,7 @@ static inline bool nss_skb_can_recycle(struct nss_ctx_instance *nss_ctx,
 	if (unlikely(nbuf->nf_bridge)) {
 		return false;
 	}
+#endif /*KERNEL_VERSION(5, 0, 0)*/
 #endif
 
 #ifdef CONFIG_XFRM
