@@ -1878,7 +1878,11 @@ static inline bool nss_skb_can_recycle(struct nss_ctx_instance *nss_ctx,
 	/*
 	 * If skb has security parameters set do not reuse
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+	if (unlikely(skb_ext_exist(nbuf, SKB_EXT_SEC_PATH))) {
+#else
 	if (unlikely(nbuf->sp)) {
+#endif /*KERNEL_VERSION(5, 0, 0)*/
 		return false;
 	}
 #endif
