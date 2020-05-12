@@ -119,9 +119,7 @@ int32_t nss_gmac_mdiobus_reset(struct mii_bus *bus)
 int32_t nss_gmac_init_mdiobus(struct nss_gmac_dev *gmacdev)
 {
 	struct mii_bus *miibus = NULL;
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
 	struct phy_device *phydev = NULL;
-#endif /*KERNEL_VERSION(4, 5, 0)*/
 
 	miibus = mdiobus_alloc();
 	if (miibus == NULL)
@@ -153,8 +151,11 @@ int32_t nss_gmac_init_mdiobus(struct nss_gmac_dev *gmacdev)
 		return -EIO;
 	}
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0))
+	phydev = mdiobus_get_phy(miibus, miibus->mdio_map[gmacdev->phy_base]->addr);
+#else
 	phydev = miibus->phy_map[gmacdev->phy_base];
+#endif /*KERNEL_VERSION(4, 5, 0)*/
 	if (!phydev) {
 		netdev_dbg(gmacdev->netdev, "%s: No phy device\n", __func__);
 		mdiobus_unregister(miibus);
@@ -163,7 +164,6 @@ int32_t nss_gmac_init_mdiobus(struct nss_gmac_dev *gmacdev)
 	}
 
 	phydev->interface = gmacdev->phy_mii_type;
-#endif /*KERNEL_VERSION(4, 5, 0)*/
 
 	gmacdev->miibus = miibus;
 	return 0;
