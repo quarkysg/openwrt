@@ -126,3 +126,17 @@
 		clock-latency-ns = <100000>;
 	};
 };
+
+&nss0 {
+	compatible = "qcom,nss";
+	qcom,low_frequency = <110000000>;
+	qcom,mid_frequency = <600000000>;
+	qcom,max_frequency = <800000000>;
+};
+
+&nss1 {
+	compatible = "qcom,nss";
+	qcom,low_frequency = <110000000>;
+	qcom,mid_frequency = <600000000>;
+	qcom,max_frequency = <800000000>;
+};
