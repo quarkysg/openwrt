@@ -533,7 +533,11 @@ static unsigned int sfe_cm_post_routing(struct sk_buff *skb, int is_v4)
 	 * For packets de-capsulated from xfrm, we still can accelerate it
 	 * on the direction we just received the packet.
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+	if (unlikely(skb_ext_exist(skb, SKB_EXT_SEC_PATH))) {
+#else
 	if (unlikely(skb->sp)) {
+#endif
 		if (sic.protocol == IPPROTO_TCP &&
 		    !(sic.flags & SFE_CREATE_FLAG_NO_SEQ_CHECK)) {
 			return NF_ACCEPT;
