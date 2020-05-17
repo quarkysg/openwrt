@@ -1793,7 +1793,7 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 		/*
 		 * Deny acceleration for L2TP-over-UDP tunnel
 		 */
-		if ((in_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(in_dev)) {
+		if ((in_dev->priv_flags_qca_ecm & IFF_QCA_ECM_PPP_L2TPV2) && ppp_is_xmit_locked(in_dev)) {
 			DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
 			can_accel = false;
 		}
@@ -1928,7 +1928,11 @@ unsigned int ecm_sfe_ported_ipv6_process(struct net_device *out_dev,
 		/*
 		 * Packet has been decrypted by ipsec, mark it in connection.
 		 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+		if (unlikely(skb_ext_exist(skb, SKB_EXT_SEC_PATH))) {
+#else
 		if (unlikely(skb->sp)) {
+#endif /*KERNEL(5, 0, 0)*/
 			((struct ecm_sfe_ported_ipv6_connection_instance *)feci)->flow_ipsec_state = ECM_SFE_IPSEC_STATE_WAS_DECRYPTED;
 			((struct ecm_sfe_ported_ipv6_connection_instance *)feci)->return_ipsec_state = ECM_SFE_IPSEC_STATE_TO_ENCRYPT;
 		}

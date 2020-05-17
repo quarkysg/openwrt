@@ -1811,7 +1811,7 @@ unsigned int ecm_nss_ported_ipv6_process(struct net_device *out_dev,
 		/*
 		 * Deny acceleration for L2TP-over-UDP tunnel
 		 */
-		if ((in_dev->priv_flags & IFF_PPP_L2TPV2) && ppp_is_xmit_locked(in_dev)) {
+		if ((in_dev->priv_flags_qca_ecm & IFF_QCA_ECM_PPP_L2TPV2) && ppp_is_xmit_locked(in_dev)) {
 			DEBUG_TRACE("Skip packets for L2TP tunnel in skb %p\n", skb);
 			can_accel = false;
 		}

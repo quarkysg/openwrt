@@ -703,7 +703,12 @@ static unsigned int ecm_sfe_ipv6_ip_process(struct net_device *out_dev, struct n
 	 * If skb_dst(skb)->xfrm is not null, packet is to be encrypted by ipsec, we can't accelerate it.
 	 * If skb->sp is not null, packet is decrypted by ipsec. We only accelerate it when configuration didn't reject ipsec.
 	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0))
+	if (unlikely((skb_dst(skb) && skb_dst(skb)->xfrm) ||
+		(ecm_sfe_ipv6_reject_acceleration_for_ipsec && skb_ext_exist(skb, SKB_EXT_SEC_PATH)))) {
+#else
 	if (unlikely((skb_dst(skb) && skb_dst(skb)->xfrm) || (ecm_sfe_ipv6_reject_acceleration_for_ipsec && skb->sp))) {
+#endif /*KERNEL_VERSION(5, 0, 0)*/
 		DEBUG_TRACE("skip local ipsec flows\n");
 		return NF_ACCEPT;
 	}

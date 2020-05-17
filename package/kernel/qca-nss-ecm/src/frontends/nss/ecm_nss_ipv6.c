@@ -854,8 +854,8 @@ static unsigned int ecm_nss_ipv6_ip_process(struct net_device *out_dev, struct n
 	/*
 	 * Do not accelerate flows to/from any virtual tunnel or tap devices.
 	 */
-	if ((in_dev->priv_flags & IFF_TUN_TAP) ||
-			(out_dev->priv_flags & IFF_TUN_TAP)) {
+	if ((in_dev->priv_flags_qca_ecm & IFF_QCA_ECM_TUN_TAP) ||
+			(out_dev->priv_flags_qca_ecm & IFF_QCA_ECM_TUN_TAP)) {
 
 		DEBUG_TRACE("virtual tunnels are not accelerated by ECM\n");
 		return NF_ACCEPT;
