@@ -121,13 +121,11 @@ static struct nla_policy fast_classifier_genl_policy[FAST_CLASSIFIER_A_MAX + 1] 
 };
 #endif /*KERNEL_VERSION(5, 2, 0)*/
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 static struct genl_multicast_group fast_classifier_genl_mcgrp[] = {
 	{
 		.name = FAST_CLASSIFIER_GENL_MCGRP,
 	},
 };
-#endif /*KERNEL_VERSION(4, 10, 0)*/
 
 static int fast_classifier_offload_genl_msg(struct sk_buff *skb, struct genl_info *info);
 static int fast_classifier_nl_genl_msg_DUMP(struct sk_buff *skb, struct netlink_callback *cb);
@@ -173,6 +171,8 @@ static struct genl_family fast_classifier_gnl_family = {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0))
 	.ops = fast_classifier_gnl_ops,
 	.n_ops = ARRAY_SIZE(fast_classifier_gnl_ops),
+	.mcgrps = fast_classifier_genl_mcgrp,
+	.n_mcgrps = ARRAY_SIZE(fast_classifier_genl_mcgrp),
 #endif /*KERNEL_VERSION(4, 10, 0)*/
 };
 
@@ -1274,7 +1274,6 @@ static int fast_classifier_conntrack_event(unsigned int events, struct nf_ct_eve
 	}
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
-
 	/*
 	 * If this is an untracked connection then we can't have any state either.
 	 */
@@ -1347,10 +1346,10 @@ static int fast_classifier_conntrack_event(unsigned int events, struct nf_ct_eve
 
 	if (is_v4) {
 		DEBUG_TRACE("Try to clean up: proto: %d src_ip: %pI4 dst_ip: %pI4, src_port: %d, dst_port: %d\n",
-			    sid.protocol, &sid.src_ip, &sid.dest_ip, sid.src_port, sid.dest_port);
+			    sid.protocol, &sid.src_ip, &sid.dest_ip, ntohs(sid.src_port), ntohs(sid.dest_port));
 	} else {
 		DEBUG_TRACE("Try to clean up: proto: %d src_ip: %pI6 dst_ip: %pI6, src_port: %d, dst_port: %d\n",
-			    sid.protocol, &sid.src_ip, &sid.dest_ip, sid.src_port, sid.dest_port);
+			    sid.protocol, &sid.src_ip, &sid.dest_ip, ntohs(sid.src_port), ntohs(sid.dest_port));
 	}
 
 	spin_lock_bh(&sfe_connections_lock);
@@ -1743,7 +1742,7 @@ static int __init fast_classifier_init(void)
 	struct fast_classifier *sc = &__sc;
 	int result = -1;
 
-	printk(KERN_ALERT "fast-classifier (PBR safe v2.1.3b): starting up\n");
+	printk(KERN_ALERT "fast-classifier (PBR safe v2.1.4a): starting up\n");
 	DEBUG_INFO("SFE CM init\n");
 
 	hash_init(fc_conn_ht);
@@ -1819,7 +1818,13 @@ static int __init fast_classifier_init(void)
 	}
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0) && LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0))
+	result = genl_register_family(&fast_classifier_gnl_family);
+	if (result) {
+		DEBUG_ERROR("failed to register genl family: %d\n", result);
+		goto exit5;
+	}
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 13, 0)
 	result = genl_register_family_with_ops_groups(&fast_classifier_gnl_family,
 						      fast_classifier_gnl_ops,
 						      fast_classifier_genl_mcgrp);
@@ -1827,7 +1832,7 @@ static int __init fast_classifier_init(void)
 		DEBUG_ERROR("failed to register genl ops: %d\n", result);
 		goto exit5;
 	}
-#elseif (LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0))
+#else
 	result = genl_register_family(&fast_classifier_gnl_family);
 	if (result) {
 		printk(KERN_CRIT "unable to register genl family\n");
@@ -1870,10 +1875,7 @@ exit6:
 	genl_unregister_family(&fast_classifier_gnl_family);
 #endif
 
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0))
 exit5:
-#endif /*KERNEL_VERSION(4, 10, 0)*/
-
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
 	nf_conntrack_unregister_notifier(&init_net, &fast_classifier_conntrack_notifier);
 
@@ -1939,7 +1941,7 @@ static void __exit fast_classifier_exit(void)
 
 	result = genl_unregister_family(&fast_classifier_gnl_family);
 	if (result != 0) {
-		printk(KERN_CRIT "Unable to unreigster genl_family\n");
+		printk(KERN_CRIT "Unable to unregister genl_family\n");
 	}
 
 #ifdef CONFIG_NF_CONNTRACK_EVENTS
