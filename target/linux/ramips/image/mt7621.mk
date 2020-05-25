@@ -468,7 +468,6 @@ endef
 TARGET_DEVICES += lenovo_newifi-d1
 
 define Device/linksys_ea7500-v2
-  $(Device/uimage-lzma-loader)
   BLOCKSIZE := 128k
   PAGESIZE := 2048
   KERNEL_SIZE := 4096k
