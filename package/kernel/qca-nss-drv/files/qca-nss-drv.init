@@ -47,4 +47,16 @@ start() {
 	if [ "$rps_enabled" -eq 1 ]; then
 		enable_rps
 	fi
+
+	# Workaround router random reboot when NSS core frequency are scaled
+	if [ -f /proc/sys/dev/nss/clock/current_freq ]; then
+		. /lib/ipq806x.sh
+
+		local board=$(ipq806x_board_name)
+		case "$board" in
+			nbg6817 | r7800)
+				echo 800000000 > /proc/sys/dev/nss/clock/current_freq
+				;;
+		esac
+	fi
 }
