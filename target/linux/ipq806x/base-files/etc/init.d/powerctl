@@ -57,11 +57,11 @@ ipq40xx_power_auto() {
 }
 
 start() {
-	. /lib/ipq806x.sh
+	. /lib/functions/uci-defaults.sh
 
-	local board=$(ipq806x_board_name)
+	local board=$(board_name)
 	case "$board" in
-	nbg6817 | r7800 | db149 | ap148 | ap145 | ap148_1xx | db149_1xx | db149_2xx | ap145_1xx | ap160 | ap160_2xx | ap161 | ak01_1xx)
+	zyxel,nbg6817 | netgear,r7800 | db149 | ap148 | ap145 | ap148_1xx | db149_1xx | db149_2xx | ap145_1xx | ap160 | ap160_2xx | ap161 | ak01_1xx)
 		ipq806x_power_auto ;;
 	ap-dk01.1-c1 | ap-dk01.1-c2 | ap-dk04.1-c1 | ap-dk04.1-c2 | ap-dk04.1-c3 | ap-dk04.1-c4 | ap-dk04.1-c5 | ap-dk05.1-c1 | ap-dk06.1-c1 | ap-dk07.1-c1 | ap-dk07.1-c2 | ap-dk07.1-c3)
 		ipq40xx_power_auto ;;

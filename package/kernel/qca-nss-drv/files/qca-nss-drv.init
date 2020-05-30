@@ -50,11 +50,11 @@ start() {
 
 	# Workaround router random reboot when NSS core frequency are scaled
 	if [ -f /proc/sys/dev/nss/clock/current_freq ]; then
-		. /lib/ipq806x.sh
+		. /lib/functions/uci-defaults.sh
 
-		local board=$(ipq806x_board_name)
+		local board=$(board_name)
 		case "$board" in
-			nbg6817 | r7800)
+			zyxel,nbg6817 | netgear,r7800)
 				echo 800000000 > /proc/sys/dev/nss/clock/current_freq
 				;;
 		esac
