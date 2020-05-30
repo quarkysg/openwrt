@@ -1370,6 +1370,8 @@ static int32_t nss_gmac_probe(struct platform_device *pdev)
 		netdev_dbg(netdev, "%s MII_PHYSID2 - 0x%04x\n", netdev->name,
 		      nss_gmac_mii_rd_reg(gmacdev, gmacdev->phy_base, MII_PHYSID2));
 	} else if (gmacdev->phy_base != NSS_GMAC_NO_MDIO_PHY) {
+		SET_NETDEV_DEV(netdev, gmacdev->miibus->parent);
+
 		/*
 		 * Issue a phy_attach for the interface connected to a switch
 		 */
