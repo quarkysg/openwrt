@@ -179,7 +179,7 @@
  
 --- a/net/netfilter/nf_conntrack_proto_tcp.c	2019-01-16 20:47:40.886993297 +0800
 +++ b/net/netfilter/nf_conntrack_proto_tcp.c	2019-01-16 20:48:57.700570104 +0800
-@@ -33,6 +33,9 @@
+@@ -33,11 +33,17 @@
  
  /* Do not check the TCP window for incoming packets  */
  static int nf_ct_tcp_no_window_check __read_mostly = 1;
@@ -189,6 +189,14 @@
  
  /* "Be conservative in what you do,
      be liberal in what you accept from others."
+     If it's non-zero, we mark only out of window RST segments as INVALID. */
+ static int nf_ct_tcp_be_liberal __read_mostly = 0;
++#ifdef CONFIG_SHORTCUT_FE
++EXPORT_SYMBOL_GPL(nf_ct_tcp_be_liberal);
++#endif
+ 
+ /* If it is set to zero, we disable picking up already established
+    connections. */
 --- a/net/bridge/br_if.c	2019-01-16 20:54:51.919367044 +0800
 +++ b/net/bridge/br_if.c	2019-01-16 20:55:53.812401263 +0800
 @@ -757,3 +757,26 @@
