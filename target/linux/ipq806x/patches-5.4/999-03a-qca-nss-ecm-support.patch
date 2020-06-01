@@ -1258,7 +1258,7 @@
  module_init(ppp_init);
 --- a/drivers/net/ppp/pppoe.c	2020-05-16 15:34:51.078824644 +0800
 +++ b/drivers/net/ppp/pppoe.c	2020-05-16 15:35:29.242824644 +0800
-@@ -1001,11 +1001,79 @@ static int pppoe_flow_offload_check(stru
+@@ -1004,11 +1004,79 @@ static int pppoe_flow_offload_check(stru
  }
  #endif /* CONFIG_NF_FLOW_TABLE */
  
@@ -1819,7 +1819,7 @@
  		   const struct in6_addr *daddr)
 --- a/net/ipv6/route.c	2020-05-16 15:34:51.098824644 +0800
 +++ b/net/ipv6/route.c	2020-05-16 15:35:29.246824644 +0800
-@@ -3720,6 +3720,9 @@ out:
+@@ -3747,6 +3747,9 @@ out:
  	return ERR_PTR(err);
  }
  
@@ -1829,7 +1829,7 @@
  int ip6_route_add(struct fib6_config *cfg, gfp_t gfp_flags,
  		  struct netlink_ext_ack *extack)
  {
-@@ -3731,6 +3734,10 @@ int ip6_route_add(struct fib6_config *cf
+@@ -3758,6 +3761,10 @@ int ip6_route_add(struct fib6_config *cf
  		return PTR_ERR(rt);
  
  	err = __ip6_ins_rt(rt, &cfg->fc_nlinfo, extack);
@@ -1840,7 +1840,7 @@
  	fib6_info_release(rt);
  
  	return err;
-@@ -3752,6 +3759,9 @@ static int __ip6_del_rt(struct fib6_info
+@@ -3779,6 +3786,9 @@ static int __ip6_del_rt(struct fib6_info
  	err = fib6_del(rt, info);
  	spin_unlock_bh(&table->tb6_lock);
  
@@ -1850,7 +1850,7 @@
  out:
  	fib6_info_release(rt);
  	return err;
-@@ -6041,6 +6051,20 @@ static int ip6_route_dev_notify(struct n
+@@ -6068,6 +6078,20 @@ static int ip6_route_dev_notify(struct n
  	return NOTIFY_OK;
  }
  
