@@ -16,12 +16,14 @@ ath79_setup_interfaces()
 	avm,fritz1750e|\
 	avm,fritz300e|\
 	comfast,cf-wr752ac-v1|\
+	comfast,cf-e130n-v2|\
 	devolo,dvl1200i|\
 	devolo,dvl1750c|\
 	devolo,dvl1750i|\
 	devolo,dvl1750x|\
 	dlink,dir-505|\
 	engenius,ecb1750|\
+	enterasys,ws-ap3705i|\
 	glinet,gl-ar300m-lite|\
 	netgear,ex6400|\
 	netgear,ex7300|\
@@ -41,6 +43,7 @@ ath79_setup_interfaces()
 	tplink,re355-v1|\
 	tplink,re450-v1|\
 	tplink,re450-v2|\
+	tplink,re450-v3|\
 	tplink,tl-wr902ac-v1|\
 	ubnt,bullet-m-ar7240|\
 	ubnt,bullet-m-ar7241|\
@@ -399,6 +402,9 @@ ath79_setup_macs()
 		eth1_mac=$(macaddr_add "$lan_mac" 1)
 		ucidef_set_interface "eth0" ifname "eth0" protocol "none" macaddr "$lan_mac"
 		ucidef_set_interface "eth1" ifname "eth1" protocol "none" macaddr "$eth1_mac"
+		;;
+	enterasys,ws-ap3705i)
+		label_mac=$(mtd_get_mac_ascii u-boot-env0 ethaddr)
 		;;
 	iodata,etg3-r)
 		lan_mac=$(mtd_get_mac_ascii u-boot-env ethaddr)

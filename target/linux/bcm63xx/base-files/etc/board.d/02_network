@@ -20,6 +20,7 @@ t-com,speedport-w-500v)
 	;;
 adb,a4001n1|\
 adb,a4001n|\
+adb,pdg-a4001n-a-000-1a1-ax|\
 adb,av4202n|\
 brcm,bcm963281tan|\
 brcm,bcm96328avng|\
@@ -119,6 +120,10 @@ sfr,neufbox-4-sercomm-r0)
 	ucidef_set_interfaces_lan_wan "eth1.1" "eth0"
 	ucidef_add_switch "switch0" \
 		"0:lan:4" "1:lan:3" "2:lan:2" "3:lan:1" "5t@eth1"
+	;;
+huawei,hg253s-v2)
+	ucidef_add_switch "switch0" \
+		"1:lan:4" "2:lan:3" "3:lan:2" "4:lan:1" "8t@eth0"
 	;;
 inteno,vg50)
 	ucidef_add_switch "switch0" \
