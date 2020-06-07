@@ -41,7 +41,7 @@ endef
 
 define Package/fast-classifier-example
   TITLE:=Example user space program for fast-classifier
-  DEPENDS:=+libnl +libfast-classifier
+  DEPENDS:=+libnl +kmod-fast-classifier
 endef
 
 define Package/fast-classifier-example/description
@@ -52,7 +52,7 @@ endef
 SFE_MAKE_OPTS:=SFE_SUPPORT_IPV6=y
 
 define Build/Compile/kmod
-	$(MAKE) $(PKG_JOBS) -C "$(LINUX_DIR)" $(strip $(SFE_MAKE_OPTS)) \
+	+$(MAKE) $(PKG_JOBS) -C "$(LINUX_DIR)" $(strip $(SFE_MAKE_OPTS)) \
 		$(KERNEL_MAKE_FLAGS) \
 		$(PKG_MAKE_FLAGS) \
 		M="$(PKG_BUILD_DIR)" \
