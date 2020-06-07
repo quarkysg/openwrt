@@ -190,7 +190,7 @@ define Device/netgear_r7800
 	BOARD_NAME := r7800
 	SUPPORTED_DEVICES += r7800
 	DEVICE_TITLE := Netgear Nighthawk X4S R7800
-	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct
+	DEVICE_PACKAGES := ath10k-firmware-qca9984-ct qca-nss-gmac
 endef
 TARGET_DEVICES += netgear_r7800
 
