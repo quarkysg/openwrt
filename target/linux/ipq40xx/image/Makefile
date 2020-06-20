@@ -43,14 +43,13 @@ define Device/UbiFit
 endef
 
 define Device/DniImage
-	KERNEL_SUFFIX := -fit-uImage.itb
-	KERNEL = kernel-bin | gzip | fit gzip $$(DTS_DIR)/$$(DEVICE_DTS).dtb
-	KERNEL_NAME := Image
+	$(call Device/FitzImage)
 	NETGEAR_BOARD_ID :=
 	NETGEAR_HW_ID :=
 	IMAGES := factory.img sysupgrade.bin
 	IMAGE/factory.img := append-kernel | pad-offset 64k 64 | append-uImage-fakehdr filesystem | append-rootfs | pad-rootfs | netgear-dni
-	IMAGE/sysupgrade.bin := append-kernel | pad-offset 64k 64 | append-uImage-fakehdr filesystem | append-rootfs | pad-rootfs | append-metadata
+	IMAGE/sysupgrade.bin := append-kernel | pad-offset 64k 64 | append-uImage-fakehdr filesystem | \
+		append-rootfs | pad-rootfs | append-metadata | check-size
 endef
 
 define Build/append-rootfshdr
@@ -217,7 +216,7 @@ define Device/avm_fritzbox-4040
 	UBOOT_PARTITION_SIZE := 524288
 	IMAGES = eva.bin sysupgrade.bin
 	IMAGE/eva.bin := append-uboot | pad-to $$$$(UBOOT_PARTITION_SIZE) | append-kernel | append-rootfs | pad-rootfs
-	IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata
+	IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata | check-size
 	DEVICE_PACKAGES := fritz-tffs fritz-caldata
 endef
 TARGET_DEVICES += avm_fritzbox-4040
@@ -378,6 +377,20 @@ define Device/engenius_emd1
 endef
 TARGET_DEVICES += engenius_emd1
 
+define Device/engenius_emr3500
+	$(call Device/FitImage)
+	DEVICE_VENDOR := EnGenius
+	DEVICE_MODEL := EMR3500
+	DEVICE_DTS_CONFIG := config@4
+	SOC := qcom-ipq4018
+	KERNEL_SIZE := 4096k
+	IMAGE_SIZE := 30720k
+	IMAGES := sysupgrade.bin factory.bin
+	IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata
+	IMAGE/factory.bin := qsdk-ipq-factory-nor | check-size
+endef
+TARGET_DEVICES += engenius_emr3500
+
 define Device/engenius_ens620ext
 	$(call Device/FitImage)
 	DEVICE_VENDOR := EnGenius
@@ -515,6 +528,7 @@ define Device/netgear_ex61x0v2
 	DEVICE_DTS_CONFIG := config@4
 	NETGEAR_BOARD_ID := EX6150v2series
 	NETGEAR_HW_ID := 29765285+16+0+128+2x2
+	IMAGE_SIZE := 14400k
 	SOC := qcom-ipq4018
 endef
 
@@ -647,6 +661,7 @@ define Device/zyxel_nbg6617
 	DEVICE_VENDOR := ZyXEL
 	DEVICE_MODEL := NBG6617
 	SOC := qcom-ipq4018
+	KERNEL_SIZE := 4096k
 	ROOTFS_SIZE := 24960k
 	RAS_BOARD := NBG6617
 	RAS_ROOTFS_SIZE := 19840k
@@ -669,8 +684,9 @@ define Device/zyxel_wre6606
 	DEVICE_MODEL := WRE6606
 	DEVICE_DTS_CONFIG := config@4
 	SOC := qcom-ipq4018
+	IMAGE_SIZE := 13184k
 	IMAGES := sysupgrade.bin
-	IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata
+	IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-rootfs | append-metadata | check-size
 	DEVICE_PACKAGES := -kmod-ath10k-ct kmod-ath10k-ct-smallbuffers
 endef
 TARGET_DEVICES += zyxel_wre6606
