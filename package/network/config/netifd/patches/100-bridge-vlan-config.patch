@@ -1,0 +1,80 @@
+--- a/system.h
++++ b/system.h
+@@ -106,6 +106,8 @@ enum bridge_opt {
+ 	BRIDGE_OPT_QUERY_INTERVAL	    = (1 << 4),
+ 	BRIDGE_OPT_QUERY_RESPONSE_INTERVAL  = (1 << 5),
+ 	BRIDGE_OPT_LAST_MEMBER_INTERVAL	    = (1 << 6),
++	BRIDGE_OPT_VLAN_DEFAULT_PVID	    = (1 << 7),
++	BRIDGE_OPT_VLAN_FILTERING	    = (1 << 8),
+ };
+ 
+ struct bridge_config {
+@@ -127,6 +129,9 @@ struct bridge_config {
+ 	int hello_time;
+ 	int max_age;
+ 	int hash_max;
++
++	int vlan_default_pvid;
++	bool vlan_filtering;
+ };
+ 
+ enum macvlan_opt {
+--- a/bridge.c
++++ b/bridge.c
+@@ -38,6 +38,8 @@ enum {
+ 	BRIDGE_ATTR_QUERY_INTERVAL,
+ 	BRIDGE_ATTR_QUERY_RESPONSE_INTERVAL,
+ 	BRIDGE_ATTR_LAST_MEMBER_INTERVAL,
++	BRIDGE_ATTR_VLAN_DEFAULT_PVID,
++	BRIDGE_ATTR_VLAN_FILTERING,
+ 	__BRIDGE_ATTR_MAX
+ };
+ 
+@@ -56,6 +58,8 @@ static const struct blobmsg_policy bridg
+ 	[BRIDGE_ATTR_ROBUSTNESS] = { "robustness", BLOBMSG_TYPE_INT32 },
+ 	[BRIDGE_ATTR_QUERY_INTERVAL] = { "query_interval", BLOBMSG_TYPE_INT32 },
+ 	[BRIDGE_ATTR_QUERY_RESPONSE_INTERVAL] = { "query_response_interval", BLOBMSG_TYPE_INT32 },
++	[BRIDGE_ATTR_VLAN_DEFAULT_PVID] = { "vlan_default_pvid", BLOBMSG_TYPE_INT32 },
++	[BRIDGE_ATTR_VLAN_FILTERING] = { "vlan_filtering", BLOBMSG_TYPE_BOOL },
+ 	[BRIDGE_ATTR_LAST_MEMBER_INTERVAL] = { "last_member_interval", BLOBMSG_TYPE_INT32 },
+ };
+ 
+@@ -633,6 +637,16 @@ bridge_apply_settings(struct bridge_stat
+ 
+ 	if ((cur = tb[BRIDGE_ATTR_BRIDGE_EMPTY]))
+ 		cfg->bridge_empty = blobmsg_get_bool(cur);
++
++	if ((cur = tb[BRIDGE_ATTR_VLAN_DEFAULT_PVID])) {
++		cfg->vlan_default_pvid = blobmsg_get_u32(cur);
++		cfg->flags |= BRIDGE_OPT_VLAN_DEFAULT_PVID;
++	}
++
++	if ((cur = tb[BRIDGE_ATTR_VLAN_FILTERING])) {
++		cfg->vlan_filtering = blobmsg_get_bool(cur);
++		cfg->flags |= BRIDGE_OPT_VLAN_FILTERING;
++	}
+ }
+ 
+ static enum dev_change_type
+--- a/system-linux.c
++++ b/system-linux.c
+@@ -1189,6 +1189,19 @@ int system_bridge_addbr(struct device *b
+ 		system_bridge_set_max_age(bridge, buf);
+ 	}
+ 
++	if (cfg->flags & BRIDGE_OPT_VLAN_DEFAULT_PVID) {
++		snprintf(buf, sizeof(buf), "%i", cfg->vlan_default_pvid);
++		system_set_dev_sysctl("/sys/devices/virtual/net/%s/bridge/vlan_filtering",
++			bridge->ifname, "0");
++		system_set_dev_sysctl("/sys/devices/virtual/net/%s/bridge/default_pvid",
++			 bridge->ifname, buf);
++	}
++
++	if (cfg->flags & BRIDGE_OPT_VLAN_FILTERING) {
++		system_set_dev_sysctl("/sys/devices/virtual/net/%s/bridge/vlan_filtering",
++			bridge->ifname, cfg->vlan_filtering ? "1" : "0");
++	}
++
+ 	return 0;
+ }
+ 
