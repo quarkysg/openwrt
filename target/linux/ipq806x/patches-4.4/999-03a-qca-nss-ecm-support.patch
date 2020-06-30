@@ -1634,7 +1634,7 @@
  static int pppoe_recvmsg(struct socket *sock, struct msghdr *m,
 --- a/net/core/neighbour.c	2018-02-17 03:09:48.000000000 +0800
 +++ b/net/core/neighbour.c	2018-11-26 16:33:55.352400228 +0800
-@@ -1059,7 +1059,19 @@
+@@ -1061,7 +1061,19 @@
  	}
  }
  
@@ -1654,7 +1654,7 @@
  
  /* Generic update routine.
     -- lladdr is new lladdr or NULL, if it is not supplied.
-@@ -1090,6 +1102,7 @@
+@@ -1092,6 +1104,7 @@
  	int notify = 0;
  	struct net_device *dev;
  	int update_isrouter = 0;
@@ -1662,7 +1662,7 @@
  
  	write_lock_bh(&neigh->lock);
  
-@@ -1097,6 +1110,8 @@
+@@ -1099,6 +1112,8 @@
  	old    = neigh->nud_state;
  	err    = -EPERM;
  
@@ -1671,7 +1671,7 @@
  	if (!(flags & NEIGH_UPDATE_F_ADMIN) &&
  	    (old & (NUD_NOARP | NUD_PERMANENT)))
  		goto out;
-@@ -1127,7 +1142,11 @@
+@@ -1129,7 +1144,11 @@
  		   and a new address is proposed:
  		   - compare new & old
  		   - if they are different, check override flag
@@ -1683,7 +1683,7 @@
  		if ((old & NUD_VALID) &&
  		    !memcmp(lladdr, neigh->ha, dev->addr_len))
  			lladdr = neigh->ha;
-@@ -1250,8 +1269,11 @@
+@@ -1252,8 +1271,11 @@
  	}
  	write_unlock_bh(&neigh->lock);
  

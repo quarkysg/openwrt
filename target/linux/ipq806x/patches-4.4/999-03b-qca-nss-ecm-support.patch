@@ -349,7 +349,7 @@
  			if (bond_is_lb(bond))
  				bond_alb_handle_link_change(bond, new_active, BOND_LINK_UP);
  		} else {
-@@ -1184,6 +1214,12 @@
+@@ -1186,6 +1217,12 @@
  		return RX_HANDLER_EXACT;
  	}
  
@@ -362,7 +362,7 @@
  	skb->dev = bond->dev;
  
  	if (BOND_MODE(bond) == BOND_MODE_ALB &&
-@@ -1298,8 +1334,9 @@
+@@ -1300,8 +1337,9 @@
  	const struct net_device_ops *slave_ops = slave_dev->netdev_ops;
  	struct slave *new_slave = NULL, *prev_slave;
  	struct sockaddr addr;
@@ -373,7 +373,7 @@
  
  	if (!bond->params.use_carrier &&
  	    slave_dev->ethtool_ops->get_link == NULL &&
-@@ -1414,8 +1451,10 @@
+@@ -1416,8 +1454,10 @@
  	 * address to be the same as the slave's.
  	 */
  	if (!bond_has_slaves(bond) &&
@@ -385,7 +385,7 @@
  
  	new_slave = bond_alloc_slave(bond);
  	if (!new_slave) {
-@@ -1443,17 +1482,24 @@
+@@ -1445,17 +1485,24 @@
  	 * set it to the master's address
  	 */
  	ether_addr_copy(new_slave->perm_hwaddr, slave_dev->dev_addr);
@@ -414,7 +414,7 @@
  			goto err_restore_mtu;
  		}
  	}
-@@ -1587,6 +1633,10 @@
+@@ -1589,6 +1636,10 @@
  		bond_set_active_slave(new_slave);
  		bond_set_slave_inactive_flags(new_slave, BOND_SLAVE_NOTIFY_NOW);
  		break;
@@ -425,7 +425,7 @@
  	default:
  		netdev_dbg(bond_dev, "This slave is always active in trunk mode\n");
  
-@@ -1683,6 +1733,12 @@
+@@ -1685,6 +1736,12 @@
  	if (bond_mode_uses_xmit_hash(bond))
  		bond_update_slave_arr(bond, NULL);
  
@@ -438,7 +438,7 @@
  	netdev_info(bond_dev, "Enslaving %s as %s interface with %s link\n",
  		    slave_dev->name,
  		    bond_is_active_slave(new_slave) ? "an active" : "a backup",
-@@ -1753,6 +1809,13 @@
+@@ -1755,6 +1812,13 @@
  		}
  	}
  
@@ -452,7 +452,7 @@
  	return res;
  }
  
-@@ -1774,6 +1837,7 @@
+@@ -1776,6 +1840,7 @@
  	struct bonding *bond = netdev_priv(bond_dev);
  	struct slave *slave, *oldcurrent;
  	struct sockaddr addr;
@@ -460,7 +460,7 @@
  	int old_flags = bond_dev->flags;
  	netdev_features_t old_features = bond_dev->features;
  
-@@ -1796,6 +1860,13 @@
+@@ -1798,6 +1863,13 @@
  		return -EINVAL;
  	}
  
@@ -474,7 +474,7 @@
  	bond_sysfs_slave_del(slave);
  
  	/* recompute stats just before removing the slave */
-@@ -1843,7 +1914,8 @@
+@@ -1845,7 +1917,8 @@
  		 * but before a new active slave is selected.
  		 */
  		bond_alb_deinit_slave(bond, slave);
@@ -484,7 +484,7 @@
  
  	if (all) {
  		RCU_INIT_POINTER(bond->curr_active_slave, NULL);
-@@ -2075,6 +2147,8 @@
+@@ -2077,6 +2150,8 @@
  {
  	struct list_head *iter;
  	struct slave *slave, *primary;
@@ -493,7 +493,7 @@
  
  	bond_for_each_slave(bond, slave, iter) {
  		switch (slave->new_link) {
-@@ -2110,9 +2184,16 @@
+@@ -2121,9 +2196,16 @@
  				bond_alb_handle_link_change(bond, slave,
  							    BOND_LINK_UP);
  
@@ -510,7 +510,7 @@
  			if (!bond->curr_active_slave || slave == primary)
  				goto do_failover;
  
-@@ -2140,6 +2221,9 @@
+@@ -2151,6 +2233,9 @@
  				bond_alb_handle_link_change(bond, slave,
  							    BOND_LINK_DOWN);
  
@@ -520,7 +520,7 @@
  			if (BOND_MODE(bond) == BOND_MODE_XOR)
  				bond_update_slave_arr(bond, NULL);
  
-@@ -2163,6 +2247,15 @@
+@@ -2174,6 +2259,15 @@
  	}
  
  	bond_set_carrier(bond);
@@ -536,7 +536,7 @@
  }
  
  /* bond_mii_monitor
-@@ -3101,6 +3195,40 @@
+@@ -3112,6 +3206,40 @@
  }
  
  /* Extract the appropriate headers based on bond's xmit policy */
@@ -577,7 +577,7 @@
  static bool bond_flow_dissect(struct bonding *bond, struct sk_buff *skb,
  			      struct flow_keys *fk)
  {
-@@ -3761,6 +3889,179 @@
+@@ -3781,6 +3909,179 @@
  	return NETDEV_TX_OK;
  }
  
@@ -757,7 +757,7 @@
  /* Use this to update slave_array when (a) it's not appropriate to update
   * slave_array right away (note that update_slave_array() may sleep)
   * and / or (b) RTNL is not held.
-@@ -3888,19 +4189,21 @@
+@@ -3908,19 +4209,21 @@
  static int bond_3ad_xor_xmit(struct sk_buff *skb, struct net_device *dev)
  {
  	struct bonding *bond = netdev_priv(dev);
@@ -790,7 +790,7 @@
  	return NETDEV_TX_OK;
  }
  
-@@ -3996,8 +4299,9 @@
+@@ -4016,8 +4319,9 @@
  		return bond_xmit_roundrobin(skb, dev);
  	case BOND_MODE_ACTIVEBACKUP:
  		return bond_xmit_activebackup(skb, dev);
@@ -801,7 +801,7 @@
  		return bond_3ad_xor_xmit(skb, dev);
  	case BOND_MODE_BROADCAST:
  		return bond_xmit_broadcast(skb, dev);
-@@ -4005,6 +4309,8 @@
+@@ -4025,6 +4319,8 @@
  		return bond_alb_xmit(skb, dev);
  	case BOND_MODE_TLB:
  		return bond_tlb_xmit(skb, dev);
@@ -810,7 +810,7 @@
  	default:
  		/* Should never happen, mode already checked */
  		netdev_err(dev, "Unknown bonding mode %d\n", BOND_MODE(bond));
-@@ -4122,6 +4428,10 @@
+@@ -4142,6 +4448,10 @@
  	struct bonding *bond = netdev_priv(bond_dev);
  	if (bond->wq)
  		destroy_workqueue(bond->wq);
@@ -821,7 +821,7 @@
  	free_netdev(bond_dev);
  }
  
-@@ -4199,10 +4509,30 @@
+@@ -4219,10 +4529,30 @@
  	list_del(&bond->bond_list);
  
  	bond_debug_unregister(bond);
@@ -852,7 +852,7 @@
  static int bond_check_params(struct bond_params *params)
  {
  	int arp_validate_value, fail_over_mac_value, primary_reselect_value, i;
-@@ -4331,6 +4661,19 @@
+@@ -4351,6 +4681,19 @@
  		all_slaves_active = 0;
  	}
  
@@ -872,7 +872,7 @@
  	if (resend_igmp < 0 || resend_igmp > 255) {
  		pr_warn("Warning: resend_igmp (%d) should be between 0 and 255, resetting to %d\n",
  			resend_igmp, BOND_DEFAULT_RESEND_IGMP);
-@@ -4600,9 +4943,19 @@
+@@ -4620,9 +4963,19 @@
  {
  	struct bonding *bond = netdev_priv(bond_dev);
  	struct bond_net *bn = net_generic(dev_net(bond_dev), bond_net_id);
@@ -892,7 +892,7 @@
  	bond->wq = create_singlethread_workqueue(bond_dev->name);
  	if (!bond->wq)
  		return -ENOMEM;
-@@ -4669,6 +5022,14 @@
+@@ -4689,6 +5042,14 @@
  	rtnl_unlock();
  	if (res < 0)
  		bond_destructor(bond_dev);
@@ -907,7 +907,7 @@
  	return res;
  }
  
-@@ -4729,6 +5090,10 @@
+@@ -4749,6 +5110,10 @@
  	if (res)
  		goto err_link;
  
@@ -918,7 +918,7 @@
  	bond_create_debugfs();
  
  	for (i = 0; i < max_bonds; i++) {
-@@ -4742,6 +5107,8 @@
+@@ -4762,6 +5127,8 @@
  	return res;
  err:
  	bond_destroy_debugfs();
@@ -927,7 +927,7 @@
  	bond_netlink_fini();
  err_link:
  	unregister_pernet_subsys(&bond_net_ops);
-@@ -4755,6 +5122,7 @@
+@@ -4775,6 +5142,7 @@
  
  	bond_destroy_debugfs();
  
