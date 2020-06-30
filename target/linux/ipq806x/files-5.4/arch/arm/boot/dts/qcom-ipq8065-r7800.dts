@@ -506,6 +506,9 @@
 &pcie0 {
 	status = "okay";
 
+	reset-gpio = <&qcom_pinmux 3 GPIO_ACTIVE_HIGH>;
+	/delete-property/ perst-gpios;
+
 	bridge@0,0 {
 		reg = <0x00000000 0 0 0 0>;
 		#address-cells = <3>;
@@ -525,6 +528,9 @@
 &pcie1 {
 	status = "okay";
 	force_gen1 = <1>;
+
+	reset-gpio = <&qcom_pinmux 48 GPIO_ACTIVE_HIGH>;
+	/delete-property/ perst-gpios;
 
 	bridge@0,0 {
 		reg = <0x00000000 0 0 0 0>;
