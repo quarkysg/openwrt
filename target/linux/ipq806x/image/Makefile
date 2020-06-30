@@ -211,7 +211,7 @@ define Device/R7800
 	PAGESIZE := 2048
 	BOARD_NAME := r7800
 	DEVICE_TITLE := Netgear Nighthawk X4S R7800
-	DEVICE_PACKAGES := ath10k-firmware-qca9984
+	DEVICE_PACKAGES := ath10k-firmware-qca9984 kmod-qca-nss-gmac
 endef
 
 define Device/NBG6817
