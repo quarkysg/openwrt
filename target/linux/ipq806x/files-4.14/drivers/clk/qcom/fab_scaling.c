@@ -129,6 +129,7 @@ EXPORT_SYMBOL(fab_scaling_unregister);
 static int ipq806x_fab_scaling_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
+	int ret;
 
 	if (!np)
 		return -ENODEV;
@@ -144,18 +145,48 @@ static int ipq806x_fab_scaling_probe(struct platform_device *pdev)
 	}
 
 	apps_fab_clk = devm_clk_get(&pdev->dev, APPS_FAB_CLK);
-	if (IS_ERR(apps_fab_clk)) {
-		pr_err("Failed to get APPS FABRIC clock\n");
+	ret = PTR_ERR_OR_ZERO(apps_fab_clk);
+	if(ret) {
+		/*
+		 * If apps fab clk node is present, but clock is not yet
+		 * registered, we should try defering probe.
+		 */
+		if (ret != -EPROBE_DEFER) {
+			pr_err("Failed to get APPS FABRIC clock: %d\n", ret);
+			ret = -ENODEV;
+		}
+		else
+			pr_warn("Deferring APPS FABRIC clock probe: %d\n", ret);
+
 		apps_fab_clk = 0;
-		return -ENODEV;
+
+		return ret;
 	}
+	pr_info("APPS FABRIC clock successfully obtained.\n");
 
 	ddr_fab_clk = devm_clk_get(&pdev->dev, DDR_FAB_CLK);
-	if (IS_ERR(ddr_fab_clk)) {
-		pr_err("Failed to get DDR FABRIC clock\n");
+	ret = PTR_ERR_OR_ZERO(ddr_fab_clk);
+	if (ret) {
+		/*
+		 * If ddr fab clk node is present, but clock is not yet
+		 * registered, we should try defering probe.
+		 */
+		if (ret != -EPROBE_DEFER) {
+			pr_err("Failed to get DDR FABRIC clock: %d\n", ret);
+			ddr_fab_clk = NULL;
+			ret = -ENODEV;
+		}
+		else
+			pr_warn("Deferring DDR FABRIC clock probe: %d\n", ret);
+
 		ddr_fab_clk = 0;
-		return -ENODEV;
+
+		return ret;
 	}
+	pr_info("DDR FABRIC clock successfully obtained.\n");
+
+	clk_prepare_enable(apps_fab_clk);
+	clk_prepare_enable(ddr_fab_clk);
 
 	return 0;
 }
