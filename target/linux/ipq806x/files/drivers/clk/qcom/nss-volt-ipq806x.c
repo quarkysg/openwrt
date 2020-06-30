@@ -74,15 +74,29 @@ static const struct of_device_id nss_ipq806x_match_table[] = {
 static int nss_ipq806x_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node, *vdd;
+	int curr_uV;
 
 	if (!np)
 		return -ENODEV;
 
 	vdd = of_parse_phandle(np, "nss_core-supply", 0);
-	if (vdd)
-		nss_reg = regulator_get(NULL, vdd->name);
+	if (vdd) {
+		nss_reg = devm_regulator_get(&pdev->dev, vdd->name);
+		if (IS_ERR(nss_reg)) {
+			pr_err("NSS regulator_get error\n");
+			return -ENODEV;
+		}
+	}
 	else
 		return -ENODEV;
+
+	pr_info("NSS nss_core-supply name: %s\n", vdd->name);
+
+	curr_uV = regulator_get_voltage(nss_reg);
+	if(curr_uV < 0) {
+		pr_warn("NSS regulator_get_voltage error: %d\n", curr_uV);
+		return -EPROBE_DEFER;
+	}
 
 	if (of_property_read_u32(np, "nss_core_vdd_nominal",
 					&nss_core_vdd_nominal)) {
