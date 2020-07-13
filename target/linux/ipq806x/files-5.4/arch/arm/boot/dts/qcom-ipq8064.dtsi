@@ -1499,6 +1499,12 @@
 			qcom,vlan-enabled;
 			qcom,wlan-dataplane-offload-enabled;
 			qcom,wlanredirect-enabled;
+			qcom,pxvlan-enabled;
+			qcom,vxlan-enabled;
+			qcom,match-enabled;
+			qcom,mirror-enabled;
+			qcom,rmnet-enabled;
+			qcom,clmap-enabled;
 		};
 
 		nss1: nss@40800000 {
