@@ -8,16 +8,6 @@
  	u32			limit;
  	const struct Qdisc_ops	*ops;
  	struct qdisc_size_table	__rcu *stab;
-@@ -1295,4 +1296,9 @@ static inline void skb_tc_reinsert(struc
- 		qstats_overlimit_inc(res->qstats);
- }
- 
-+/* QCA NSS Qdisc Support - Start */
-+void qdisc_destroy(struct Qdisc *qdisc);
-+void tcf_destroy_chain(struct tcf_proto __rcu **fl);
-+/* QCA NSS Qdisc Support - End */
-+
- #endif
 --- a/include/uapi/linux/pkt_sched.h
 +++ b/include/uapi/linux/pkt_sched.h
 @@ -1181,4 +1181,248 @@ enum {
@@ -269,51 +259,3 @@
 +};
 +/* QCA NSS Clients Support - End */
  #endif
---- a/net/sched/sch_api.c
-+++ b/net/sched/sch_api.c
-@@ -2290,4 +2290,26 @@ static int __init pktsched_init(void)
- 	return 0;
- }
- 
-+/* QCA NSS Qdisc Support - Start */
-+bool tcf_destroy(struct tcf_proto *tp, bool force)
-+{
-+	tp->ops->destroy(tp, force, NULL);
-+	module_put(tp->ops->owner);
-+	kfree_rcu(tp, rcu);
-+
-+	return true;
-+}
-+
-+void tcf_destroy_chain(struct tcf_proto __rcu **fl)
-+{
-+	struct tcf_proto *tp;
-+
-+	while ((tp = rtnl_dereference(*fl)) != NULL) {
-+		RCU_INIT_POINTER(*fl, tp->next);
-+		tcf_destroy(tp, true);
-+	}
-+}
-+EXPORT_SYMBOL(tcf_destroy_chain);
-+/* QCA NSS Qdisc Support - End */
-+
- subsys_initcall(pktsched_init);
---- a/net/sched/sch_generic.c
-+++ b/net/sched/sch_generic.c
-@@ -741,7 +741,7 @@ static void qdisc_free_cb(struct rcu_hea
- 	qdisc_free(q);
- }
-
--static void qdisc_destroy(struct Qdisc *qdisc)
-+void qdisc_destroy(struct Qdisc *qdisc)
- {
- 	const struct Qdisc_ops  *ops = qdisc->ops;
- 	struct sk_buff *skb, *tmp;
-@@ -772,6 +772,7 @@ static void qdisc_destroy(struct Qdisc *
- 
- 	call_rcu(&qdisc->rcu, qdisc_free_cb);
- }
-+EXPORT_SYMBOL(qdisc_destroy);
- 
- void qdisc_put(struct Qdisc *qdisc)
- {

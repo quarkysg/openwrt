@@ -1,6 +1,6 @@
 --- a/nss_qdisc/nss_qdisc.c
 +++ b/nss_qdisc/nss_qdisc.c
-@@ -2708,9 +2708,11 @@ static int nss_qdisc_if_event_cb(struct
+@@ -2711,9 +2711,11 @@ static int nss_qdisc_if_event_cb(struct
  	case NETDEV_BR_JOIN:
  		nss_qdisc_info("Reveived NETDEV_BR_JOIN on interface %s\n",
  				dev->name);
