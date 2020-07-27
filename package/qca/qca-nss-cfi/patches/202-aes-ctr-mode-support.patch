@@ -73,6 +73,37 @@
  		goto fail;
  
  	ctx->cip_alg = cip.algo;
+@@ -340,6 +348,30 @@ void nss_cryptoapi_skcipher_done(struct
+ 	}
+ 
+ skip_nr_iv:
++	/* For AES-CTR mode, calculate the next round IV */
++	if (ctx->cip_alg == NSS_CRYPTO_CIPHER_AES_CTR && !ctx->is_rfc3686) {
++		uint64_t iv_part = 0;
++		uint32_t iv_incr = 0;
++		int idx;
++
++		/* Get IV counter increments */
++		iv_incr = req->cryptlen >> 4;
++		if (req->cryptlen & 0xF)
++			iv_incr++;
++
++		iv_part = ntohl(((uint32_t *)req->iv)[3]) + iv_incr;
++		((uint32_t *)req->iv)[3] = htonl(iv_part & 0xFFFFFFFF);
++		if (unlikely(iv_part & 0xFFFFFFFF00000000)) {
++			for (idx = 2; idx >=0; idx--) {
++				iv_part = ntohl(((uint32_t *)req->iv)[idx]) + 1;
++				((uint32_t *)req->iv)[idx] = htonl(iv_part & 0xFFFFFFFF);
++
++				if (likely(!(iv_part & 0xFFFFFFFF00000000)))
++					break;
++			}
++		}
++	}
++
+ 	if (nss_cryptoapi_ablk_checkaddr(req)) {
+ 		copied_bytes = sg_copy_buffer(req->dst, sg_nents(req->dst),
+ 					      phys_to_virt(buf->data_out),
 @@ -486,7 +494,16 @@ struct nss_crypto_buf *nss_cryptoapi_abl
  	iv_addr = nss_crypto_get_ivaddr(buf);
  
