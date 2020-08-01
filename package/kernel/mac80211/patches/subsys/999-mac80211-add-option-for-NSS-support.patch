@@ -75,7 +75,7 @@
  /**
   * DOC: Interface list locking
   *
-@@ -1127,6 +1134,95 @@ static void ieee80211_uninit(struct net_
+@@ -1127,6 +1134,96 @@ static void ieee80211_uninit(struct net_
  	ieee80211_teardown_sdata(IEEE80211_DEV_TO_SUB_IF(dev));
  }
  
@@ -162,6 +162,7 @@
 +		nss_virt_if_destroy_sync(sdata->nssctx);
 +		sdata_info(sdata, "Destroyed NSS virtual interface\n");
 +
++		tasklet_kill(&sdata->ieee80211_nss_rq_tasklet);
 +		__skb_queue_purge(&sdata->rq_for_nss);
 +		sdata_info(sdata, "RX-Q purged.\n");
 +	}
