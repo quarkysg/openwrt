@@ -697,10 +697,12 @@ ar8327_init_globals(struct ar8xxx_priv *priv)
 	    AR8327_FWD_CTRL0_MIRROR_PORT;
 	ar8xxx_write(priv, AR8327_REG_FWD_CTRL0, t);
 
-	/* forward multicast and broadcast frames to CPU */
+	/* forward multicast and broadcast frames to CPU
+	   forward IGMP JOIN/LEAVE to CPU as well */
 	t = (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_UC_FLOOD_S) |
 	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_MC_FLOOD_S) |
-	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_BC_FLOOD_S);
+	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_BC_FLOOD_S) |
+	    ((BIT(0) | BIT(6)) << AR8327_FWD_CTRL1_IGMP_S);
 	ar8xxx_write(priv, AR8327_REG_FWD_CTRL1, t);
 
 	/* enable jumbo frames */
@@ -853,15 +855,20 @@ ar8327_set_port_igmp(struct ar8xxx_priv *priv, int port, int enable)
 			  AR8327_FRAME_ACK_CTRL_IGMP_LEAVE) <<
 			 AR8327_FRAME_ACK_CTRL_S(port);
 
+	if (port == 0 || port == 6) {
+		pr_warn("ar8327: IGMP Snooping not supported for CPU port[%d]!\n", port);
+		return;
+	}
+
 	if (enable) {
 		ar8xxx_rmw(priv, AR8327_REG_FWD_CTRL1,
-			   BIT(port) << AR8327_FWD_CTRL1_IGMP_S,
+			   BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S,
 			   BIT(port) << AR8327_FWD_CTRL1_IGMP_S);
 		ar8xxx_reg_set(priv, reg_frame_ack, val_frame_ack);
 	} else {
 		ar8xxx_rmw(priv, AR8327_REG_FWD_CTRL1,
 			   BIT(port) << AR8327_FWD_CTRL1_IGMP_S,
-			   0);
+			   BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S);
 		ar8xxx_reg_clear(priv, reg_frame_ack, val_frame_ack);
 	}
 }
