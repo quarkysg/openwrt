@@ -693,7 +693,6 @@ ar8327_init_globals(struct ar8xxx_priv *priv)
 
 	/* enable CPU port and disable mirror port */
 	t = AR8327_FWD_CTRL0_CPU_PORT_EN |
-	    AR8327_FWD_CTRL0_IGMP_COPY_EN |
 	    AR8327_FWD_CTRL0_MIRROR_PORT;
 	ar8xxx_write(priv, AR8327_REG_FWD_CTRL0, t);
 
@@ -701,8 +700,7 @@ ar8327_init_globals(struct ar8xxx_priv *priv)
 	   forward IGMP JOIN/LEAVE to CPU as well */
 	t = (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_UC_FLOOD_S) |
 	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_MC_FLOOD_S) |
-	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_BC_FLOOD_S) |
-	    ((BIT(0) | BIT(6)) << AR8327_FWD_CTRL1_IGMP_S);
+	    (AR8327_PORTS_ALL << AR8327_FWD_CTRL1_BC_FLOOD_S);
 	ar8xxx_write(priv, AR8327_REG_FWD_CTRL1, t);
 
 	/* enable jumbo frames */
@@ -832,17 +830,14 @@ ar8327_atu_flush_port(struct ar8xxx_priv *priv, int port)
 static int
 ar8327_get_port_igmp(struct ar8xxx_priv *priv, int port)
 {
-	u32 fwd_ctrl, frame_ack;
+	u32 frame_ack;
 
-	fwd_ctrl = (BIT(port) << AR8327_FWD_CTRL1_IGMP_S);
 	frame_ack = ((AR8327_FRAME_ACK_CTRL_IGMP_MLD |
 		      AR8327_FRAME_ACK_CTRL_IGMP_JOIN |
 		      AR8327_FRAME_ACK_CTRL_IGMP_LEAVE) <<
 		     AR8327_FRAME_ACK_CTRL_S(port));
 
-	return (ar8xxx_read(priv, AR8327_REG_FWD_CTRL1) &
-			fwd_ctrl) == fwd_ctrl &&
-		(ar8xxx_read(priv, AR8327_REG_FRAME_ACK_CTRL(port)) &
+	return (ar8xxx_read(priv, AR8327_REG_FRAME_ACK_CTRL(port)) &
 			frame_ack) == frame_ack;
 }
 
@@ -855,22 +850,10 @@ ar8327_set_port_igmp(struct ar8xxx_priv *priv, int port, int enable)
 			  AR8327_FRAME_ACK_CTRL_IGMP_LEAVE) <<
 			 AR8327_FRAME_ACK_CTRL_S(port);
 
-	if (port == 0 || port == 6) {
-		pr_warn("ar8327: IGMP Snooping not supported for CPU port[%d]!\n", port);
-		return;
-	}
-
-	if (enable) {
-		ar8xxx_rmw(priv, AR8327_REG_FWD_CTRL1,
-			   BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S,
-			   BIT(port) << AR8327_FWD_CTRL1_IGMP_S);
+	if (enable)
 		ar8xxx_reg_set(priv, reg_frame_ack, val_frame_ack);
-	} else {
-		ar8xxx_rmw(priv, AR8327_REG_FWD_CTRL1,
-			   BIT(port) << AR8327_FWD_CTRL1_IGMP_S,
-			   BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S);
+	else
 		ar8xxx_reg_clear(priv, reg_frame_ack, val_frame_ack);
-	}
 }
 
 static void
@@ -1304,12 +1287,138 @@ ar8327_sw_set_port_vlan_prio(struct switch_dev *dev, const struct switch_attr *a
 
 static int
 ar8327_sw_get_port_vlan_prio(struct switch_dev *dev, const struct switch_attr *attr,
-                  struct switch_val *val)
+			     struct switch_val *val)
 {
 	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
 	int port = val->port_vlan;
 
 	val->value.i = priv->port_vlan_prio[port];
+
+	return 0;
+}
+
+int
+ar8327_sw_set_port_igmp_dp(struct switch_dev *dev,
+			   const struct switch_attr *attr,
+			   struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+
+	if (port >= dev->ports)
+		return -EINVAL;
+
+	mutex_lock(&priv->reg_mutex);
+	if (val->value.i) {
+		ar8xxx_reg_set(priv, AR8327_REG_FWD_CTRL1,
+				BIT(port) << AR8327_FWD_CTRL1_IGMP_S);
+	}
+	else {
+		ar8xxx_reg_clear(priv, AR8327_REG_FWD_CTRL1,
+				BIT(port) << AR8327_FWD_CTRL1_IGMP_S);
+	}
+	mutex_unlock(&priv->reg_mutex);
+
+	return 0;
+}
+
+int
+ar8327_sw_get_port_igmp_dp(struct switch_dev *dev,
+			   const struct switch_attr *attr,
+			   struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+	u32 t;
+
+	mutex_lock(&priv->reg_mutex);
+	t = ar8xxx_read(priv, AR8327_REG_FWD_CTRL1);
+	val->value.i = ((t >> AR8327_FWD_CTRL1_IGMP_S) >> port) & 1;
+	mutex_unlock(&priv->reg_mutex);
+
+	return 0;
+}
+
+int
+ar8327_sw_set_port_mc_flood(struct switch_dev *dev,
+			    const struct switch_attr *attr,
+			    struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+
+	if (port >= dev->ports)
+		return -EINVAL;
+
+	mutex_lock(&priv->reg_mutex);
+	if (val->value.i) {
+		ar8xxx_reg_set(priv, AR8327_REG_FWD_CTRL1,
+				BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S);
+	}
+	else {
+		ar8xxx_reg_clear(priv, AR8327_REG_FWD_CTRL1,
+				BIT(port) << AR8327_FWD_CTRL1_MC_FLOOD_S);
+	}
+	mutex_unlock(&priv->reg_mutex);
+
+	return 0;
+}
+
+int
+ar8327_sw_get_port_mc_flood(struct switch_dev *dev,
+			    const struct switch_attr *attr,
+			    struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+	u32 t;
+
+	mutex_lock(&priv->reg_mutex);
+	t = ar8xxx_read(priv, AR8327_REG_FWD_CTRL1);
+	val->value.i = ((t >> AR8327_FWD_CTRL1_MC_FLOOD_S) >> port) & 1;
+	mutex_unlock(&priv->reg_mutex);
+
+	return 0;
+}
+
+int
+ar8327_sw_set_port_mc_leaky(struct switch_dev *dev,
+			    const struct switch_attr *attr,
+			    struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+
+	if (port >= dev->ports)
+		return -EINVAL;
+
+	mutex_lock(&priv->reg_mutex);
+	if (val->value.i) {
+		ar8xxx_reg_set(priv, AR8327_REG_PORT_LOOKUP(port),
+				AR8327_PORT_LOOKUP_MULTI_LEAKY_EN);
+	}
+	else {
+		ar8xxx_reg_clear(priv, AR8327_REG_PORT_LOOKUP(port),
+				AR8327_PORT_LOOKUP_MULTI_LEAKY_EN);
+	}
+	mutex_unlock(&priv->reg_mutex);
+
+	return 0;
+}
+
+int
+ar8327_sw_get_port_mc_leaky(struct switch_dev *dev,
+			    const struct switch_attr *attr,
+			    struct switch_val *val)
+{
+	struct ar8xxx_priv *priv = swdev_to_ar8xxx(dev);
+	int port = val->port_vlan;
+	u32 t;
+
+	mutex_lock(&priv->reg_mutex);
+	t = ar8xxx_read(priv, AR8327_REG_PORT_LOOKUP(port));
+	val->value.i = (t >> AR8327_PORT_LOOKUP_MULTI_LEAKY_EN_S) & 1;
+	mutex_unlock(&priv->reg_mutex);
 
 	return 0;
 }
@@ -1456,6 +1565,30 @@ static const struct switch_attr ar8327_sw_attr_port[] = {
 		.set = ar8327_sw_set_port_vlan_prio,
 		.get = ar8327_sw_get_port_vlan_prio,
 		.max = 7,
+	},
+	{
+		.type = SWITCH_TYPE_INT,
+		.name = "igmp_dp",
+		.description = "Send IGMP Fast Join/Leave out this port",
+		.set = ar8327_sw_set_port_igmp_dp,
+		.get = ar8327_sw_get_port_igmp_dp,
+		.max = 1,
+	},
+	{
+		.type = SWITCH_TYPE_INT,
+		.name = "mc_flood",
+		.description = "Flood port with multicast traffic",
+		.set = ar8327_sw_set_port_mc_flood,
+		.get = ar8327_sw_get_port_mc_flood,
+		.max = 1,
+	},
+	{
+		.type = SWITCH_TYPE_INT,
+		.name = "mc_leaky",
+		.description = "Allow received multicast frames to leak across VLAN",
+		.set = ar8327_sw_set_port_mc_leaky,
+		.get = ar8327_sw_get_port_mc_leaky,
+		.max = 1,
 	},
 };
 
