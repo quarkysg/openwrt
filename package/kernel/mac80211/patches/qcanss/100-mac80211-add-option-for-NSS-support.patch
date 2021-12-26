@@ -214,7 +214,7 @@
  		if (rx->list)
  #if LINUX_VERSION_IS_GEQ(4,19,0)
  			list_add_tail(&skb->list, rx->list);
-@@ -4529,6 +4585,12 @@ static void ieee80211_rx_8023(struct iee
+@@ -4530,6 +4586,12 @@ static void ieee80211_rx_8023(struct iee
  	/* deliver to local stack */
  	skb->protocol = eth_type_trans(skb, fast_rx->dev);
  	memset(skb->cb, 0, sizeof(skb->cb));
@@ -258,7 +258,7 @@
  
  				/*
  				 * Since queue is stopped, queue up frames for
-@@ -4375,6 +4390,29 @@ out:
+@@ -4387,6 +4402,29 @@ out:
  netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
  				       struct net_device *dev)
  {
