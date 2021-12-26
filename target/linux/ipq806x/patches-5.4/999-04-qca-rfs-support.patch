@@ -1,6 +1,6 @@
 --- a/include/linux/netdevice.h
 +++ b/include/linux/netdevice.h
-@@ -939,6 +939,19 @@ enum flow_offload_type {
+@@ -930,6 +930,19 @@ enum flow_offload_type {
  	FLOW_OFFLOAD_DEL,
  };
  
@@ -20,7 +20,7 @@
  /*
   * This structure defines the management hooks for network devices.
   * The following hooks can be defined; unless noted otherwise, they are
-@@ -1379,6 +1392,11 @@ struct net_device_ops {
+@@ -1370,6 +1383,11 @@ struct net_device_ops {
  						     const struct sk_buff *skb,
  						     u16 rxq_index,
  						     u32 flow_id);
