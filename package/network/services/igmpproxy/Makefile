@@ -35,13 +35,33 @@ define Package/igmpproxy/description
 	only IGMP signalling (Internet Group Management Protocol).
 endef
 
+define Package/igmpproxy/config
+  if PACKAGE_igmpproxy
+    if PACKAGE_kmod-qca-mcs
+      config PACKAGE_IGMPROXY_QCA_MCS_SUPPORT
+        bool "Enable QCA Multicast Snooping Module Support"
+        default y
+        help
+          This option enables support for the QCA Multicast Snooping module.
+          Enabling this will enable multicast traffic to be accelerated by
+          the QCA NSS ECM module.
+    endif
+  endif
+endef
+
 define Package/igmpproxy/conffiles
 /etc/config/igmpproxy
 endef
 
 TARGET_CFLAGS += -Dlog=igmpproxy_log
 
+ifneq ($(CONFIG_PACKAGE_IGMPROXY_QCA_MCS_SUPPORT),)
+  CONFIG_SUFFIX=.qca-mcs
+  TARGET_CFLAGS += -DIGMPPROXY_QCA_MCS_SUPPORT
+endif
+
 define Build/Compile
+	cd $(PKG_BUILD_DIR) && aclocal
 	$(MAKE) -C $(PKG_BUILD_DIR)/src \
 		CC="$(TARGET_CC)" \
 		CFLAGS="$(TARGET_CFLAGS) -std=gnu99"
@@ -49,9 +69,9 @@ endef
 
 define Package/igmpproxy/install
 	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/igmpproxy.config $(1)/etc/config/igmpproxy
+	$(INSTALL_CONF) ./files/igmpproxy.config$(CONFIG_SUFFIX) $(1)/etc/config/igmpproxy
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/igmpproxy.init $(1)/etc/init.d/igmpproxy
+	$(INSTALL_BIN) ./files/igmpproxy.init$(CONFIG_SUFFIX) $(1)/etc/init.d/igmpproxy
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/src/igmpproxy $(1)/usr/sbin/
 endef
