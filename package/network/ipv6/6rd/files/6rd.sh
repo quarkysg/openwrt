@@ -79,7 +79,6 @@ proto_6rd_setup() {
 	else
 		json_add_string local "$ipaddr"
 	fi
-	json_add_string remote "$peeraddr"
 	[ -n "$tunlink" ] && json_add_string link "$tunlink"
 
 	json_add_object 'data'
