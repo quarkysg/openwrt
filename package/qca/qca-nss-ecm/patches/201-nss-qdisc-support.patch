@@ -1,6 +1,6 @@
 --- a/frontends/nss/ecm_nss_common.h
 +++ b/frontends/nss/ecm_nss_common.h
-@@ -272,7 +272,7 @@ static inline bool ecm_nss_common_igs_ac
+@@ -274,7 +274,7 @@ static inline bool ecm_nss_common_igs_ac
  		/*
  		 * Check whether ingress qdisc is attached to the egress device or not.
  		 */

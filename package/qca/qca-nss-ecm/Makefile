@@ -78,7 +78,8 @@ endef
 define KernelPackage/qca-nss-ecm-standard
   $(call KernelPackage/qca-nss-ecm/Default)
   VARIANT:=standard
-  DEPENDS+=+PACKAGE_kmod-qca-mcs:kmod-qca-mcs
+  DEPENDS+=+PACKAGE_kmod-qca-mcs:kmod-qca-mcs \
+	   +PACKAGE_kmod-pppol2tp:kmod-pppol2tp
 endef
 
 define KernelPackage/qca-nss-ecm-standard/description
@@ -191,11 +192,6 @@ ECM_MAKE_OPTS+=ECM_MULTICAST_ENABLE=y \
 ifeq ($(CONFIG_TARGET_ipq_ipq40xx)$(CONFIG_TARGET_ipq40xx),)
 ECM_MAKE_OPTS+=ECM_INTERFACE_BOND_ENABLE=y
 endif
-else
-ECM_MAKE_OPTS+= ECM_INTERFACE_IPSEC_ENABLE=y \
-		ECM_INTERFACE_SIT_ENABLE=y \
-		ECM_INTERFACE_TUNIPIP6_ENABLE=y \
-		ECM_INTERFACE_RAWIP_ENABLE=y
 endif
 
 ifeq ($(filter $(CONFIG_KERNEL_IPQ_MEM_PROFILE), 256),)
@@ -222,6 +218,31 @@ endif
 
 ifneq ($(CONFIG_PACKAGE_kmod-macvlan),)
 ECM_MAKE_OPTS+=ECM_INTERFACE_MACVLAN_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-qca-mcs),)
+ECM_MAKE_OPTS+=ECM_MULTICAST_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-ipsec),)
+ECM_MAKE_OPTS+=ECM_INTERFACE_IPSEC_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-pppol2tp),)
+ECM_MAKE_OPTS+=ECM_INTERFACE_L2TPV2_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-gre)$(CONFIG_PACKAGE_kmod-gre6),)
+ECM_MAKE_OPTS+=ECM_INTERFACE_GRE_TAP_ENABLE=y \
+		ECM_INTERFACE_GRE_TUN_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-sit),)
+ECM_MAKE_OPTS+=ECM_INTERFACE_SIT_ENABLE=y
+endif
+
+ifneq ($(CONFIG_PACKAGE_kmod-ip6-tunnel),)
+ECM_MAKE_OPTS+=ECM_INTERFACE_TUNIPIP6_ENABLE=y
 endif
 
 # Keeping default as ipq806x for branches that does not have subtarget framework

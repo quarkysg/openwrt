@@ -1,0 +1,43 @@
+--- a/frontends/nss/ecm_nss_common.h
++++ b/frontends/nss/ecm_nss_common.h
+@@ -163,15 +163,17 @@ static inline int32_t ecm_nss_common_get
+ 		/*
+ 		 * If device is not GRETAP then return NONE.
+ 		 */
+-		if (!(dev->priv_flags & (IFF_GRE_V4_TAP | IFF_GRE_V6_TAP))) {
++		if (!(dev->priv_flags_qca_ecm & (IFF_QCA_ECM_GRE_V4_TAP | IFF_QCA_ECM_GRE_V6_TAP))) {
+ 			break;
+ 		}
++		goto gre_cont;
+ #endif
+ #ifdef ECM_INTERFACE_GRE_TUN_ENABLE
+ 	case ARPHRD_IPGRE:
+ 	case ARPHRD_IP6GRE:
+ #endif
+ #if defined(ECM_INTERFACE_GRE_TAP_ENABLE) || defined(ECM_INTERFACE_GRE_TUN_ENABLE)
++gre_cont:
+ 		if (feci->protocol == IPPROTO_GRE) {
+ 			return NSS_DYNAMIC_INTERFACE_TYPE_GRE_OUTER;
+ 		}
+--- a/frontends/nss/ecm_nss_non_ported_ipv4.c
++++ b/frontends/nss/ecm_nss_non_ported_ipv4.c
+@@ -677,7 +677,7 @@ static void ecm_nss_non_ported_ipv4_conn
+ #ifdef ECM_INTERFACE_GRE_TAP_ENABLE
+ 			dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
+ 			if (dev) {
+-				if (dev->priv_flags & IFF_GRE_V4_TAP) {
++				if (dev->priv_flags_qca_ecm & IFF_QCA_ECM_GRE_V4_TAP) {
+ 					/*
+ 					 * Clear QOS_VALID to prevent outer rule from overwriting
+ 					 * inner flow's QoS classification.
+--- a/frontends/nss/ecm_nss_non_ported_ipv6.c
++++ b/frontends/nss/ecm_nss_non_ported_ipv6.c
+@@ -585,7 +585,7 @@ static void ecm_nss_non_ported_ipv6_conn
+ #ifdef ECM_INTERFACE_GRE_TAP_ENABLE
+ 			dev = dev_get_by_index(&init_net, ecm_db_iface_interface_identifier_get(ii));
+ 			if (dev) {
+-				if (dev->priv_flags & IFF_GRE_V6_TAP) {
++				if (dev->priv_flags_qca_ecm & IFF_QCA_ECM_GRE_V6_TAP) {
+ 					/*
+ 					 * Clear QOS_VALID to prevent outer rule from overwriting
+ 					 * inner flow's QoS classification.
