@@ -39,7 +39,7 @@ proto_6rd_setup() {
 	}
 
 	local pvtwanip=$ipaddr
-	[ -n "$pvtwan" ] && {
+	[ "$pvtwan" != "0" ] && {
 		local ipaddr=`wget -O - -q http://whatismyip.akamai.com`
 		if [ $? -gt 0 ]
 		then
@@ -73,7 +73,7 @@ proto_6rd_setup() {
 	json_add_boolean df "${df:-1}"
 	json_add_int ttl "${ttl:-64}"
 	[ -n "$tos" ] && json_add_string tos "$tos"
-	if [ -n "$pvtwan" ]
+	if [ "$pvtwan" != "0" ]
 	then
 		json_add_string local "$pvtwanip"
 	else
