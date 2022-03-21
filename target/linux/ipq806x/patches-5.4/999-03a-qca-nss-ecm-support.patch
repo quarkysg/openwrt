@@ -157,7 +157,7 @@
  
  	unsigned short		gflags;
  	unsigned short		padded;
-@@ -2555,6 +2570,10 @@ enum netdev_cmd {
+@@ -2556,6 +2571,10 @@ enum netdev_cmd {
  	NETDEV_CVLAN_FILTER_DROP_INFO,
  	NETDEV_SVLAN_FILTER_PUSH_INFO,
  	NETDEV_SVLAN_FILTER_DROP_INFO,
@@ -451,7 +451,7 @@
  			break;
  		case AD_MUX_COLLECTING_DISTRIBUTING:
  			if (!(port->sm_vars & AD_PORT_SELECTED) ||
-@@ -1895,6 +1951,8 @@ static void ad_enable_collecting_distrib
+@@ -1896,6 +1952,8 @@ static void ad_enable_collecting_distrib
  					      bool *update_slave_arr)
  {
  	if (port->aggregator->is_active) {
@@ -460,7 +460,7 @@
  		slave_dbg(port->slave->bond->dev, port->slave->dev,
  			  "Enabling port %d (LAG %d)\n",
  			  port->actor_port_number,
-@@ -1902,6 +1960,16 @@ static void ad_enable_collecting_distrib
+@@ -1903,6 +1961,16 @@ static void ad_enable_collecting_distrib
  		__enable_port(port);
  		/* Slave array needs update */
  		*update_slave_arr = true;
@@ -477,7 +477,7 @@
  	}
  }
  
-@@ -2759,3 +2827,101 @@ int bond_3ad_stats_fill(struct sk_buff *
+@@ -2780,3 +2848,101 @@ int bond_3ad_stats_fill(struct sk_buff *
  
  	return 0;
  }
@@ -673,7 +673,7 @@
  	bond_sysfs_slave_del(slave);
  
  	/* recompute stats just before removing the slave */
-@@ -2218,6 +2261,10 @@ static void bond_miimon_commit(struct bo
+@@ -2217,6 +2260,10 @@ static void bond_miimon_commit(struct bo
  {
  	struct list_head *iter;
  	struct slave *slave, *primary;
@@ -684,7 +684,7 @@
  
  	bond_for_each_slave(bond, slave, iter) {
  		switch (slave->link_new_state) {
-@@ -2261,6 +2308,12 @@ static void bond_miimon_commit(struct bo
+@@ -2260,6 +2307,12 @@ static void bond_miimon_commit(struct bo
  
  			bond_miimon_link_change(bond, slave, BOND_LINK_UP);
  
@@ -697,7 +697,7 @@
  			if (!bond->curr_active_slave || slave == primary)
  				goto do_failover;
  
-@@ -2302,6 +2355,15 @@ do_failover:
+@@ -2301,6 +2354,15 @@ do_failover:
  	}
  
  	bond_set_carrier(bond);
@@ -713,7 +713,7 @@
  }
  
  /* bond_mii_monitor
-@@ -4384,6 +4446,11 @@ static void bond_destructor(struct net_d
+@@ -4383,6 +4445,11 @@ static void bond_destructor(struct net_d
  	struct bonding *bond = netdev_priv(bond_dev);
  	if (bond->wq)
  		destroy_workqueue(bond->wq);
@@ -725,7 +725,7 @@
  }
  
  void bond_setup(struct net_device *bond_dev)
-@@ -4933,6 +5000,16 @@ int bond_create(struct net *net, const c
+@@ -4932,6 +4999,16 @@ int bond_create(struct net *net, const c
  	bond_work_init_all(bond);
  
  	rtnl_unlock();
@@ -742,7 +742,7 @@
  	return 0;
  }
  
-@@ -5028,6 +5105,203 @@ static void __exit bonding_exit(void)
+@@ -5027,6 +5104,203 @@ static void __exit bonding_exit(void)
  #endif
  }
  
@@ -956,7 +956,7 @@
  
  #include <linux/nsproxy.h>
  #include <net/net_namespace.h>
-@@ -3218,6 +3219,10 @@ ppp_connect_channel(struct channel *pch,
+@@ -3223,6 +3224,10 @@ ppp_connect_channel(struct channel *pch,
  	struct ppp_net *pn;
  	int ret = -ENXIO;
  	int hdrlen;
@@ -967,7 +967,7 @@
  
  	pn = ppp_pernet(pch->chan_net);
  
-@@ -3249,6 +3254,26 @@ ppp_connect_channel(struct channel *pch,
+@@ -3254,6 +3259,26 @@ ppp_connect_channel(struct channel *pch,
  	++ppp->n_channels;
  	pch->ppp = ppp;
  	refcount_inc(&ppp->file.refcnt);
@@ -994,7 +994,7 @@
  	ppp_unlock(ppp);
  	ret = 0;
  
-@@ -3352,6 +3377,320 @@ static void *unit_find(struct idr *p, in
+@@ -3357,6 +3382,320 @@ static void *unit_find(struct idr *p, in
  	return idr_find(p, n);
  }
  
