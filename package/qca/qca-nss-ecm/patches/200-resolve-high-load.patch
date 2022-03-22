@@ -16,7 +16,7 @@ task should be interruptible.
 @@ -2441,7 +2441,7 @@ static void ecm_nss_ipv4_stats_sync_req_
  		}
  
- 		if (ecm_nss_ipv4_next_req_time > current_jiffies) {
+ 		if (time_after(ecm_nss_ipv4_next_req_time, current_jiffies)) {
 -			msleep(jiffies_to_msecs(ecm_nss_ipv4_next_req_time - current_jiffies));
 +			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv4_next_req_time - current_jiffies));
  		}
@@ -36,7 +36,7 @@ task should be interruptible.
 @@ -2158,7 +2158,7 @@ static void ecm_nss_ipv6_stats_sync_req_
  		}
  
- 		if (ecm_nss_ipv6_next_req_time > current_jiffies) {
+ 		if (time_after(ecm_nss_ipv6_next_req_time, current_jiffies)) {
 -			msleep(jiffies_to_msecs(ecm_nss_ipv6_next_req_time - current_jiffies));
 +			msleep_interruptible(jiffies_to_msecs(ecm_nss_ipv6_next_req_time - current_jiffies));
  		}

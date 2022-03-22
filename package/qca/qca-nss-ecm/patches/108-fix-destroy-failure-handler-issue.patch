@@ -1,0 +1,70 @@
+From 6949ba62d9deb413f23f752a0de490380343ffad Mon Sep 17 00:00:00 2001
+From: Murat Sezgin <msezgin@codeaurora.org>
+Date: Tue, 9 Jun 2020 18:23:24 -0700
+Subject: [qca-nss-ecm] Fix destroy failure handler issue
+
+There is race between two defunct calls, if the first
+one is failed and while we are handling it, another
+defunct call comes before setting the retry timer group.
+This patch avoids to call another defunct callback
+while in the middle of handling the failed one.
+
+Signed-off-by: Murat Sezgin <msezgin@codeaurora.org>
+Change-Id: I7f6799499b3d6ee9b86df349136eb9187a5fb7eb
+---
+ frontends/include/ecm_front_end_common.h | 12 ++++++++++++
+ frontends/include/ecm_front_end_types.h  |  1 +
+ 2 files changed, 13 insertions(+)
+
+diff --git a/frontends/include/ecm_front_end_common.h b/frontends/include/ecm_front_end_common.h
+index 0e687fb..b0eb09e 100644
+--- a/frontends/include/ecm_front_end_common.h
++++ b/frontends/include/ecm_front_end_common.h
+@@ -171,6 +171,13 @@ static inline bool ecm_front_end_common_connection_defunct_check(struct ecm_fron
+ 	DEBUG_ASSERT(spin_is_locked(&feci->lock), "%p: feci lock is not held\n", feci);
+ 
+ 	/*
++	 * If we have not completed the destroy failure handling, do nothing.
++	 */
++	if (feci->destroy_fail_handle_pending) {
++		return false;
++	}
++
++	/*
+ 	 * If connection has already become defunct, do nothing.
+ 	 */
+ 	if (feci->is_defunct) {
+@@ -267,6 +274,7 @@ static inline bool ecm_front_end_destroy_failure_handle(struct ecm_front_end_con
+ 	 */
+ 	feci->accel_mode = ECM_FRONT_END_ACCELERATION_MODE_ACCEL;
+ 	feci->is_defunct = false;
++	feci->destroy_fail_handle_pending = true;
+ 	spin_unlock_bh(&feci->lock);
+ 
+ 	/*
+@@ -275,6 +283,10 @@ static inline bool ecm_front_end_destroy_failure_handle(struct ecm_front_end_con
+ 	 */
+ 	ecm_db_connection_defunct_timer_remove_and_set(feci->ci, ECM_DB_TIMER_GROUPS_CONNECTION_DEFUNCT_RETRY_TIMEOUT);
+ 
++	spin_lock_bh(&feci->lock);
++	feci->destroy_fail_handle_pending = false;
++	spin_unlock_bh(&feci->lock);
++
+ 	return false;
+ }
+ 
+diff --git a/frontends/include/ecm_front_end_types.h b/frontends/include/ecm_front_end_types.h
+index a4f830e..d37f6f5 100644
+--- a/frontends/include/ecm_front_end_types.h
++++ b/frontends/include/ecm_front_end_types.h
+@@ -170,6 +170,7 @@ struct ecm_front_end_connection_instance {
+ 	struct ecm_db_connection_instance *ci;			/* RO: The connection instance relating to this instance. */
+ 	bool can_accel;						/* RO: True when the connection can be accelerated */
+ 	bool is_defunct;					/* True if the connection has become defunct */
++	bool destroy_fail_handle_pending;			/* Set while handling the connection destroy failure */
+ 	ecm_front_end_acceleration_mode_t accel_mode;		/* Indicates the type of acceleration being applied to a connection, if any. */
+ 	spinlock_t lock;					/* Lock for structure data */
+ 	int refs;						/* Integer to trap we never go negative */
+-- 
+cgit v1.1
+
