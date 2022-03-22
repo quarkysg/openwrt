@@ -1,0 +1,1375 @@
+[qca-nss-ecm] Add acceleration delay feature
+
+With this option, the acceleration of the flows can be
+delayed until a number of packets are seen in the slow
+path or forever until both direction traffic is seen.
+
+The debugfs node which enables this feature is located under
+/sys/kernel/debug/ecm/ecm_classifier_default directory
+with the file name "accel_delay_pkts".
+
+Enable different features by setting the accel_delay_pkts
+- 0 means feature is disabled
+- 1 means  delay until both direction is seen
+- <N> means delay until N number of packets are seen.
+
+By default this feature is disabled.
+
+Signed-off-by: Murat Sezgin <msezgin@codeaurora.org>
+Change-Id: I0234fb8de4f9447c0bda4eeaa3b19f9bd62b8eaa
+
+Patch addapted from:
+https://source.codeaurora.org/quic/qsdk/oss/lklm/qca-nss-ecm/commit/?h=NHSS.QSDK.11.5&id=1de80f85fb49f9d90b20916e848bc3a4754b08fb
+
+[qca-nss-ecm] Add accel delay option to DSCP classifier
+
+- With this option, UDP flows' both direction's DSCP
+and QoS values can be set separately.
+- We no longer store these values in the DSCP remark
+extension instance. There is no need to do it, because
+these values are already read from the buffer each time
+the packet is processed by the classifier.
+
+Signed-off-by: Murat Sezgin <msezgin@codeaurora.org>
+Change-Id: I3a32436ec609e77014447847e1a5ac4b2aa5e217
+
+Patch addapted from:
+https://source.codeaurora.org/quic/qsdk/oss/lklm/qca-nss-ecm/commit/?h=NHSS.QSDK.11.5&id=8d9067212e10ede2fe61f6430358fee11f0b693f
+
+[qca-nss-ecm] Fix acceleration delay feature
+
+- Check the acceleration delay in the default classifier
+  process function after checking the connection status.
+  If the connection status is already not ready for the
+  acceleartion, do not allow the acceleration.
+- Enable this feature only for ported flows.
+- Do not reset the slow path packet count after the
+  connection is accelerated, continue to count it.
+
+Change-Id: I0ab22b698b27200d8016805eb178cc35c07a7945
+Signed-off-by: Murat Sezgin <msezgin@codeaurora.org>
+
+Patch addapted from:
+https://source.codeaurora.org/quic/qsdk/oss/lklm/qca-nss-ecm/commit/?h=NHSS.QSDK.11.5&id=689c3aa6ea165067271c3f2a8e57766ccd7f2049
+
+--- a/ecm_classifier.h
++++ b/ecm_classifier.h
+@@ -14,6 +14,8 @@
+  **************************************************************************
+  */
+ 
++extern int ecm_classifier_accel_delay_pkts;	/* Default slow path packets allowed before the acceleration */
++
+ struct ecm_classifier_instance;
+ 
+ /*
+--- a/frontends/include/ecm_front_end_common.h
++++ b/frontends/include/ecm_front_end_common.h
+@@ -298,7 +298,4 @@ extern bool ecm_front_end_gre_proto_is_a
+ 						      struct sk_buff *skb,
+ 						      struct nf_conntrack_tuple *tuple,
+ 						      int ip_version);
+-extern bool ecm_front_end_tcp_check_ct_and_fill_dscp(struct nf_conn *ct,
+-						     struct ecm_tracker_ip_header *iph,
+-						     struct sk_buff *skb,
+-						     ecm_tracker_sender_type_t sender);
++extern uint64_t ecm_front_end_get_slow_packet_count(struct ecm_front_end_connection_instance *feci);
+--- a/frontends/include/ecm_front_end_types.h
++++ b/frontends/include/ecm_front_end_types.h
+@@ -1,6 +1,6 @@
+ /*
+  **************************************************************************
+- * Copyright (c) 2014-2020, The Linux Foundation.  All rights reserved.
++ * Copyright (c) 2014-2021, The Linux Foundation.  All rights reserved.
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+  * above copyright notice and this permission notice appear in all copies.
+@@ -129,6 +129,7 @@ struct ecm_front_end_connection_mode_sta
+ 	uint32_t ae_nack_total;		/* Total times accel engine NAK's an accel command */
+ 	uint32_t ae_nack;			/* Count of consecutive times driver failed to ack */
+ 	uint32_t ae_nack_limit;		/* Limit on consecutive nacks at which point offload permanently fails out */
++	uint64_t slow_path_packets;		/* The number of slow packets before the acceleration starts */
+ 	unsigned long cmd_time_begun;		/* Time captured when an accel or decel request begun */
+ 	unsigned long cmd_time_completed;	/* Time captured when request finished */
+ };
+--- a/ecm_classifier.c
++++ b/ecm_classifier.c
+@@ -58,6 +58,14 @@
+ #endif
+ 
+ /*
++ * Default slow path packets allowed before the acceleration
++ *  0 - The feature is disabled. Acceleration starts immediately.
++ *  1 - Acceleration will not start until both direction traffic is seen.
++ *  N - Acceleration will not start until N packets are seen in the slow path.
++ */
++int ecm_classifier_accel_delay_pkts = 0;
++
++/*
+  * ecm_classifier_assign_classifier()
+  *	Instantiate and assign classifier of type upon the connection, also returning it if it could be allocated.
+  */
+--- a/ecm_classifier_default.c
++++ b/ecm_classifier_default.c
+@@ -1,6 +1,6 @@
+ /*
+  **************************************************************************
+- * Copyright (c) 2014-2016, 2020, The Linux Foundation.  All rights reserved.
++ * Copyright (c) 2014-2016, 2020-2021, The Linux Foundation. All rights reserved.
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+  * above copyright notice and this permission notice appear in all copies.
+@@ -67,6 +67,7 @@
+ #include "ecm_tracker_tcp.h"
+ #include "ecm_db.h"
+ #include "ecm_classifier_default.h"
++#include "ecm_front_end_common.h"
+ 
+ /*
+  * Magic numbers
+@@ -93,7 +94,7 @@ struct ecm_classifier_default_internal_i
+ 	ecm_tracker_sender_type_t egress_sender;		/* RO: Which sender is sending egress data */
+ 
+ 	struct ecm_tracker_instance *ti;			/* RO: Tracker used for state and timer group checking. Pointer will not change so safe to access outside of lock. */
+-
++	bool packet_seen[ECM_CONN_DIR_MAX];                     /* Per-direction packet seen flag */
+ 	int refs;						/* Integer to trap we never go negative */
+ #if (DEBUG_LEVEL > 0)
+ 	uint16_t magic;
+@@ -201,14 +202,97 @@ static int ecm_classifier_default_deref(
+ }
+ 
+ /*
+- * ecm_classifier_default_process_callback()
+- *	Process new data updating the priority
++ * ecm_classifier_default_ready_for_accel()
++ *	Checks if the connection is ready for the acceleration.
+  *
+- * NOTE: This function would only ever be called if all other classifiers have failed.
++ * This function is called, if the acceleration delay feature is enabled.
++ */
++static bool ecm_classifier_default_ready_for_accel(
++			struct ecm_classifier_default_internal_instance *cdii,
++			ecm_tracker_sender_type_t sender)
++{
++	uint64_t slow_pkts;
++	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
++
++	/*
++	 * We delay the acceleration for TCP and UDP protocols only.
++	 * Non-ported protocols mostly the outer connections of the flows.
++	 * Acceleration delay is required to inspect the packets and
++	 * the outer connections are generally do not need inspection.
++	 */
++	if (cdii->protocol != IPPROTO_TCP && cdii->protocol != IPPROTO_UDP) {
++		DEBUG_TRACE("%p: Accel delay is not enabled for protocol: %d\n", cdii, cdii->protocol);
++		return true;
++	}
++
++	/*
++	 * Delay forever until seeing the reply packet.
++	 */
++	if (ecm_classifier_accel_delay_pkts == 1) {
++		DEBUG_INFO("%p: Checking both direction traffic\n", cdii);
++
++		/*
++		 * Set the flow and return direction packet seen flags.
++		 */
++		if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
++			cdii->packet_seen[ECM_CONN_DIR_FLOW] = true;
++		} else {
++			cdii->packet_seen[ECM_CONN_DIR_RETURN] = true;
++		}
++
++		/*
++		 * Check if both direction traffic is seen.
++		 */
++		return cdii->packet_seen[ECM_CONN_DIR_FLOW] && cdii->packet_seen[ECM_CONN_DIR_RETURN];
++	}
++
++	/*
++	 * Delay the acceleration until we see <N> number of packets.
++	 * ecm_classifier_accel_delay_pkts = <N>
++	 */
++	ci = ecm_db_connection_serial_find_and_ref(cdii->ci_serial);
++	if (!ci) {
++		DEBUG_TRACE("%p: No ci found for %u\n", cdii, cdii->ci_serial);
++		return false;
++	}
++
++	/*
++	 * Get the packet count we have seen in the slow path so far.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	slow_pkts = ecm_front_end_get_slow_packet_count(feci);
++	feci->deref(feci);
++	ecm_db_connection_deref(ci);
++
++	/*
++	 * Check if we have seen slow path packets as the predefined count.
++	 */
++	if (slow_pkts < ecm_classifier_accel_delay_pkts) {
++		DEBUG_TRACE("%p: delay the acceleration: slow packets: %llu default delay packet count: %d\n",
++			    cdii, slow_pkts, ecm_classifier_accel_delay_pkts);
++
++		/*
++		 * We haven't reached the slow path packet limit.
++		 * We can wait more to accelerate the connection.
++		 */
++		return false;
++	}
++
++	/*
++	 * We waited enough time for the acceleration, we can allow it now.
++	 */
++	DEBUG_INFO("%p: Let the flow accel, waited enough packet\n", cdii);
++	return true;
++}
++
++/*
++ * ecm_classifier_default_process()
++ *	Process the flow for acceleration decision.
+  */
+ static void ecm_classifier_default_process(struct ecm_classifier_instance *aci, ecm_tracker_sender_type_t sender,
+-									struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb,
+-									struct ecm_classifier_process_response *process_response)
++					   struct ecm_tracker_ip_header *ip_hdr, struct sk_buff *skb,
++					   struct ecm_classifier_process_response *process_response)
+ {
+ 	struct ecm_tracker_instance *ti;
+ 	ecm_tracker_sender_state_t from_state;
+@@ -218,10 +302,8 @@ static void ecm_classifier_default_proce
+ 	struct ecm_classifier_default_internal_instance *cdii = (struct ecm_classifier_default_internal_instance *)aci;
+ 	struct nf_conn *ct;
+ 	enum ip_conntrack_info ctinfo;
+-	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: invalid state magic\n", cdii);
+-
+ 
+-	spin_lock_bh(&ecm_classifier_default_lock);
++	DEBUG_CHECK_MAGIC(cdii, ECM_CLASSIFIER_DEFAULT_INTERNAL_INSTANCE_MAGIC, "%p: invalid state magic\n", cdii);
+ 
+ 	/*
+ 	 * Get qos result and accel mode
+@@ -231,6 +313,7 @@ static void ecm_classifier_default_proce
+ 		/*
+ 		 * Still relevant but have no actions that need processing
+ 		 */
++		spin_lock_bh(&ecm_classifier_default_lock);
+ 		cdii->process_response.process_actions = 0;
+ 		*process_response = cdii->process_response;
+ 		spin_unlock_bh(&ecm_classifier_default_lock);
+@@ -238,17 +321,6 @@ static void ecm_classifier_default_proce
+ 	}
+ 
+ 	/*
+-	 * Accel?
+-	 */
+-	if (ecm_classifier_default_accel_mode != ECM_CLASSIFIER_ACCELERATION_MODE_DONT_CARE) {
+-		cdii->process_response.accel_mode = ecm_classifier_default_accel_mode;
+-		cdii->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
+-	} else {
+-		cdii->process_response.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
+-	}
+-	spin_unlock_bh(&ecm_classifier_default_lock);
+-
+-	/*
+ 	 * Update connection state
+ 	 * Compute the timer group this connection should be in.
+ 	 * For this we need the tracker and the state to be updated.
+@@ -269,8 +341,19 @@ static void ecm_classifier_default_proce
+ 		/*
+ 		 * Record for future change comparisons
+ 		 */
++		DEBUG_INFO("%p: timer group changed from %d to %d\n", cdii, cdii->timer_group, tg);
+ 		cdii->timer_group = tg;
+ 	}
++
++	/*
++	 * Don't care?
++	 */
++	if (ecm_classifier_default_accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_DONT_CARE) {
++		cdii->process_response.process_actions &= ~ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
++		*process_response = cdii->process_response;
++		spin_unlock_bh(&ecm_classifier_default_lock);
++		return;
++	}
+ 	spin_unlock_bh(&ecm_classifier_default_lock);
+ 
+ 	/*
+@@ -278,9 +361,12 @@ static void ecm_classifier_default_proce
+ 	 */
+ 	if (cdii->protocol != IPPROTO_TCP) {
+ 		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
+-			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
++			DEBUG_INFO("%p: Protocol: %d is non-TCP, prevailing_state: %d\n", cdii, cdii->protocol, prevailing_state);
++			spin_lock_bh(&ecm_classifier_default_lock);
++			goto accel_no;
+ 		}
+-		goto return_response;
++		DEBUG_INFO("%p: Protocol: %d is non-TCP, prevailing_state ESTABLISHED\n", cdii, cdii->protocol);
++		goto check_delay;
+ 	}
+ 
+ 	/*
+@@ -291,32 +377,57 @@ static void ecm_classifier_default_proce
+ 	ct = nf_ct_get(skb, &ctinfo);
+ 	if (!ct) {
+ 		DEBUG_TRACE("%p: No Conntrack found for packet, using ECM tracker state\n", cdii);
+-		if (unlikely(prevailing_state != ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
+-			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+-			goto return_response;
+-		}
+-	} else {
+-		/*
+-		* If the connection is shutting down do not manage it.
+-		* state can not be SYN_SENT, SYN_RECV because connection is assured
+-		* Not managed states: FIN_WAIT, CLOSE_WAIT, LAST_ACK, TIME_WAIT, CLOSE.
+-		*/
+-		spin_lock_bh(&ct->lock);
+-		if (ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+-			spin_unlock_bh(&ct->lock);
+-			DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
+-			cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
+-			goto return_response;
++		if (unlikely(prevailing_state == ECM_TRACKER_CONNECTION_STATE_ESTABLISHED)) {
++			DEBUG_INFO("%p: TCP prevailing_state ESTABLISHED\n", cdii);
++			goto check_delay;
+ 		}
++
++		DEBUG_INFO("%p: TCP prevailing_state: %d\n", cdii, prevailing_state);
++
++		spin_lock_bh(&ecm_classifier_default_lock);
++		goto accel_no;
++	}
++
++	/*
++	* If the connection is shutting down do not manage it.
++	* state can not be SYN_SENT, SYN_RECV because connection is assured
++	* Not managed states: FIN_WAIT, CLOSE_WAIT, LAST_ACK, TIME_WAIT, CLOSE.
++	*/
++	spin_lock_bh(&ct->lock);
++	if (ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+ 		spin_unlock_bh(&ct->lock);
++		DEBUG_TRACE("%p: Connection in termination state %#X\n", ct, ct->proto.tcp.state);
++		spin_lock_bh(&ecm_classifier_default_lock);
++		goto accel_no;
++	}
++	spin_unlock_bh(&ct->lock);
++
++check_delay:
++	/*
++	 * Should we delay the acceleration?
++	 */
++	if (ecm_classifier_accel_delay_pkts) {
++		if (!ecm_classifier_default_ready_for_accel(cdii, sender)) {
++			DEBUG_INFO("%p: connection is not ready for accel\n", cdii);
++			spin_lock_bh(&ecm_classifier_default_lock);
++			goto accel_no;
++		}
++		DEBUG_INFO("%p: connection is ready for accel\n", cdii);
+ 	}
+ 
+-return_response:
+-	;
+ 	/*
+ 	 * Return the process response
+ 	 */
+ 	spin_lock_bh(&ecm_classifier_default_lock);
++	cdii->process_response.accel_mode = ecm_classifier_default_accel_mode;
++	cdii->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
++	*process_response = cdii->process_response;
++	spin_unlock_bh(&ecm_classifier_default_lock);
++	return;
++
++accel_no:
++	cdii->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
++	cdii->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
+ 	*process_response = cdii->process_response;
+ 	spin_unlock_bh(&ecm_classifier_default_lock);
+ }
+@@ -476,6 +587,9 @@ static int ecm_classifier_default_state_
+ 	if ((result = ecm_state_write(sfi, "timer_group", "%d", timer_group))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "accel_delay_pkt_default", "%d", ecm_classifier_accel_delay_pkts))) {
++		return result;
++	}
+ 
+ 	/*
+ 	 * Output our last process response
+@@ -652,6 +766,13 @@ int ecm_classifier_default_init(struct d
+ 		debugfs_remove_recursive(ecm_classifier_default_dentry);
+ 		return -1;
+ 	}
++
++	if (!debugfs_create_u32("accel_delay_pkts", S_IRUGO | S_IWUSR, ecm_classifier_default_dentry,
++					(u32 *)&ecm_classifier_accel_delay_pkts)) {
++		DEBUG_ERROR("Failed to create accel delay packet counts in debugfs\n");
++		debugfs_remove_recursive(ecm_classifier_default_dentry);
++		return -1;
++	}
+ 
+ 	return 0;
+ }
+--- a/ecm_classifier_dscp.c
++++ b/ecm_classifier_dscp.c
+@@ -67,6 +67,7 @@
+ #include "ecm_tracker_tcp.h"
+ #include "ecm_db.h"
+ #include "ecm_classifier_dscp.h"
++#include "ecm_front_end_common.h"
+ 
+ /*
+  * Magic numbers
+@@ -85,7 +86,7 @@ struct ecm_classifier_dscp_instance {
+ 
+ 	uint32_t ci_serial;					/* RO: Serial of the connection */
+ 	struct ecm_classifier_process_response process_response;/* Last process response computed */
+-
++	bool packet_seen[ECM_CONN_DIR_MAX];			/* Per-direction packet seen flag */
+ 	int refs;						/* Integer to trap we never go negative */
+ #if (DEBUG_LEVEL > 0)
+ 	uint16_t magic;
+@@ -188,6 +189,35 @@ static int ecm_classifier_dscp_deref(str
+ }
+ 
+ /*
++ * ecm_classifier_dscp_is_bidi_packet_seen()
++ *	Return true if both direction packets are seen.
++ */
++static inline bool ecm_classifier_dscp_is_bidi_packet_seen(struct ecm_classifier_dscp_instance *cdscpi)
++{
++	return ((cdscpi->packet_seen[ECM_CONN_DIR_FLOW] == true) && (cdscpi->packet_seen[ECM_CONN_DIR_RETURN] == true));
++}
++
++/*
++ * ecm_classifier_dscp_fill_info()
++ *	Save the QoS and DSCP values in the classifier instance.
++ */
++static void ecm_classifier_dscp_fill_info(struct ecm_classifier_dscp_instance *cdscpi,
++					 ecm_tracker_sender_type_t sender,
++					 struct ecm_tracker_ip_header *ip_hdr,
++					 struct sk_buff *skb)
++{
++	if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
++		cdscpi->process_response.flow_qos_tag = skb->priority;
++		cdscpi->process_response.flow_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
++		cdscpi->packet_seen[ECM_CONN_DIR_FLOW] = true;
++	} else {
++		cdscpi->process_response.return_qos_tag = skb->priority;
++		cdscpi->process_response.return_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
++		cdscpi->packet_seen[ECM_CONN_DIR_RETURN] = true;
++	}
++}
++
++/*
+  * ecm_classifier_dscp_process()
+  *	Process new data for connection
+  */
+@@ -205,11 +235,8 @@ static void ecm_classifier_dscp_process(
+ 	struct nf_conn *ct;
+ 	enum ip_conntrack_info ctinfo;
+ 	struct nf_ct_dscpremark_ext *dscpcte;
+-	uint32_t flow_qos_tag = 0;
+-	uint32_t return_qos_tag = 0;
+-	uint8_t flow_dscp = 0;
+-	uint8_t return_dscp = 0;
+ 	bool dscp_marked = false;
++	uint64_t slow_pkts;
+ 
+ 	cdscpi = (struct ecm_classifier_dscp_instance *)aci;
+ 	DEBUG_CHECK_MAGIC(cdscpi, ECM_CLASSIFIER_DSCP_INSTANCE_MAGIC, "%p: magic failed\n", cdscpi);
+@@ -224,10 +251,9 @@ static void ecm_classifier_dscp_process(
+ 	 * Are we relevant?
+ 	 */
+ 	if (relevance == ECM_CLASSIFIER_RELEVANCE_NO) {
+-		/*
+-		 * Lock still held
+-		 */
+-		goto dscp_classifier_out;
++		*process_response = cdscpi->process_response;
++		spin_unlock_bh(&ecm_classifier_dscp_lock);
++		return;
+ 	}
+ 
+ 	/*
+@@ -241,11 +267,10 @@ static void ecm_classifier_dscp_process(
+ 	 * Any other condition and we are not and will stop analysing this connection.
+ 	 */
+ 	if (!ecm_classifier_dscp_enabled) {
+-		/*
+-		 * Lock still held
+-		 */
+ 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+-		goto dscp_classifier_out;
++		*process_response = cdscpi->process_response;
++		spin_unlock_bh(&ecm_classifier_dscp_lock);
++		return;
+ 	}
+ 	spin_unlock_bh(&ecm_classifier_dscp_lock);
+ 
+@@ -262,6 +287,7 @@ static void ecm_classifier_dscp_process(
+ 
+ 	feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 	accel_mode = feci->accel_state_get(feci);
++	slow_pkts = ecm_front_end_get_slow_packet_count(feci);
+ 	feci->deref(feci);
+ 	protocol = ecm_db_connection_protocol_get(ci);
+ 	ecm_db_connection_deref(ci);
+@@ -276,6 +302,7 @@ static void ecm_classifier_dscp_process(
+ 	 */
+ 	ct = nf_ct_get(skb, &ctinfo);
+ 	if (!ct) {
++		DEBUG_WARN("%p: no conntrack found\n", cdscpi);
+ 		spin_lock_bh(&ecm_classifier_dscp_lock);
+ 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+ 		goto dscp_classifier_out;
+@@ -288,6 +315,7 @@ static void ecm_classifier_dscp_process(
+ 	dscpcte = nf_ct_dscpremark_ext_find(ct);
+ 	if (!dscpcte) {
+ 		spin_unlock_bh(&ct->lock);
++		DEBUG_WARN("%p: no DSCP conntrack extension found\n", cdscpi);
+ 		spin_lock_bh(&ecm_classifier_dscp_lock);
+ 		cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_NO;
+ 		goto dscp_classifier_out;
+@@ -299,116 +327,128 @@ static void ecm_classifier_dscp_process(
+ 	 */
+ 	if (nf_conntrack_dscpremark_ext_get_dscp_rule_validity(ct)
+ 				== NF_CT_DSCPREMARK_EXT_RULE_VALID) {
++		DEBUG_TRACE("%p: DSCP remark extension is valid\n", cdscpi);
+ 		dscp_marked = true;
+ 	}
++	spin_unlock_bh(&ct->lock);
+ 
+ 	/*
+-	 * For TCP flows, we would have the values for both the directions by
+-	 * the time the connection is established. For UDP flows, we copy
+-	 * over the values from one direction to another if we find the
+-	 * values for the other direction not set, which would be due to one
+-	 * of the following.
+-	 * a. We might not have seen a packet in the opposite direction
+-	 * b. There were no explicitly configured priority/DSCP for the opposite
+-	 *    direction.
++	 * We are relevant to the connection
+ 	 */
++	became_relevant = ecm_db_time_get();
++
++	spin_lock_bh(&ecm_classifier_dscp_lock);
++	cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
++	cdscpi->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_ACCEL_MODE;
++	cdscpi->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL;
++	cdscpi->process_response.became_relevant = became_relevant;
++
+ 	if (protocol == IPPROTO_TCP) {
+ 		/*
+-		 * TCP is established at this point, priority and DSCP values were already in the extension instance.
+-		 * They were extracted from the skb in the frontend file. So, copy them from there.
++		 * Stop the processing if both side packets are already seen.
++		 * Above the process response is already set to allow the acceleration.
+ 		 */
+-		if (((sender == ECM_TRACKER_SENDER_TYPE_SRC) && (IP_CT_DIR_ORIGINAL == CTINFO2DIR(ctinfo))) ||
+-				((sender == ECM_TRACKER_SENDER_TYPE_DEST) && (IP_CT_DIR_REPLY == CTINFO2DIR(ctinfo)))) {
+-			flow_qos_tag = dscpcte->flow_priority;
+-			return_qos_tag = dscpcte->reply_priority;
+-			flow_dscp = dscpcte->flow_dscp;
+-			return_dscp = dscpcte->reply_dscp;
+-		} else {
+-			/* TCP is in established state and the direction of this packet is opposite to the direction of the ct
+-			 * in which the TCP connection was initiated. This can be the case when the ECM rule was originally
+-			 * created in the direction of the ct, but defuncted for some reason. And the next packet that is now being
+-			 * processed by ECM for this TCP connection is in the opposite direction relative to ct. So, we ensure that
+-			 * we retrieve the qos_tag/dscp from the ct based on the direction of the new ECM connection relative to the ct
+-			 */
+-			return_qos_tag = dscpcte->flow_priority;
+-			flow_qos_tag = dscpcte->reply_priority;
+-			return_dscp = dscpcte->flow_dscp;
+-			flow_dscp = dscpcte->reply_dscp;
++		if (ecm_classifier_dscp_is_bidi_packet_seen(cdscpi)) {
++			DEBUG_TRACE("%p: TCP bi-di packets seen\n", cdscpi);
++			goto done;
+ 		}
+-		DEBUG_TRACE("TCP Flow DSCP: %x Flow priority: %d, Return DSCP: %x Return priority: %d sender: %d ct_dir: %d\n",
+-			    flow_dscp, flow_qos_tag, return_dscp, return_qos_tag, sender, CTINFO2DIR(ctinfo));
+ 
+-	} else { /* UDP */
+-		if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
++		/*
++		 * Store the QoS and DSCP info in the classifier instance and deny the
++		 * acceleration if both side info is not yet available.
++		 */
++		ecm_classifier_dscp_fill_info(cdscpi, sender, ip_hdr, skb);
++		if (!ecm_classifier_dscp_is_bidi_packet_seen(cdscpi)) {
++			DEBUG_TRACE("%p: TCP both side info is not yet picked\n", cdscpi);
++			cdscpi->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
++			goto dscp_classifier_out;
++		}
++	} else {
++		/*
++		 * If the acceleration delay option is enabled, we will wait
++		 * until seeing both side traffic.
++		 *
++		 * There are 2 options:
++		 * Option 1: Wait forever until to see the reply direction traffic
++		 * Option 2: Wait for seeing N number of packets. If we still don't see reply,
++		 * set the uni-directional values.
++		 */
++		if (ecm_classifier_accel_delay_pkts) {
+ 			/*
+-			 * Record latest flow
++			 * Stop the processing if both side packets are already seen.
++			 * Above the process response is already set to allow the
++			 * acceleration.
+ 			 */
+-			flow_qos_tag = skb->priority;
+-			dscpcte->flow_priority = flow_qos_tag;
+-			flow_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;	/* NOTE: XT_DSCP_SHIFT is okay for V4 and V6 */
+-			dscpcte->flow_dscp = flow_dscp;
++			if (ecm_classifier_dscp_is_bidi_packet_seen(cdscpi)) {
++				DEBUG_TRACE("%p: UDP bi-di packets seen\n", cdscpi);
++				goto done;
++			}
+ 
+ 			/*
+-			 * Copy over the flow direction QoS
+-			 * and DSCP if the reply direction
+-			 * values are not set.
++			 * Store the QoS and DSCP info in the classifier instance and allow the
++			 * acceleration if both side info is not yet available.
+ 			 */
+-			if (dscpcte->reply_priority == 0) {
+-				return_qos_tag = flow_qos_tag;
+-			} else {
+-				return_qos_tag = dscpcte->reply_priority;
++			ecm_classifier_dscp_fill_info(cdscpi, sender, ip_hdr, skb);
++			if (ecm_classifier_dscp_is_bidi_packet_seen(cdscpi)) {
++				DEBUG_TRACE("%p: UDP both side info is picked\n", cdscpi);
++				goto done;
+ 			}
+ 
+-			if (dscpcte->reply_dscp == 0) {
+-				return_dscp = flow_dscp;
+-			} else {
+-				return_dscp = dscpcte->reply_dscp;
++			/*
++			 * Deny the acceleration if any of the below options holds true.
++			 * For option 1, we wait forever
++			 * For option 2, we wait until seeing ecm_classifier_accel_delay_pkts.
++			 */
++			if ((ecm_classifier_accel_delay_pkts == 1) || (slow_pkts < ecm_classifier_accel_delay_pkts)) {
++				DEBUG_TRACE("%p: accel_delay_pkts: %d slow_pkts: %llu accel is not allowed yet\n",
++						cdscpi, ecm_classifier_accel_delay_pkts, slow_pkts);
++				cdscpi->process_response.accel_mode = ECM_CLASSIFIER_ACCELERATION_MODE_NO;
++				goto dscp_classifier_out;
+ 			}
++		}
++
++		/*
++		 * If we didn't see both direction traffic during the acceleration
++		 * delay time, we can allow the acceleration by setting the uni-directional
++		 * values to both flow and return QoS and DSCP.
++		 */
++		if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
++			cdscpi->process_response.flow_qos_tag = skb->priority;
++			cdscpi->process_response.flow_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
+ 
+-		} else {
+ 			/*
+-			 * Record latest return
++			 * If UDP bi-di traffic is being run, it is possible that other direction's
++			 * QoS and DSCP values are also set by the subsequent packets before we push
++			 * the rule to NSS. So, let's update them, if they are not set.
+ 			 */
+-			return_qos_tag = skb->priority;
+-			dscpcte->reply_priority = return_qos_tag;
+-			return_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;	/* NOTE: XT_DSCP_SHIFT is okay for V4 and V6 */
+-			dscpcte->reply_dscp = return_dscp;
++			if (cdscpi->process_response.return_qos_tag == 0) {
++				cdscpi->process_response.return_qos_tag = skb->priority;
++			}
++
++			if (cdscpi->process_response.return_dscp == 0) {
++				cdscpi->process_response.return_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
++			}
++
++		} else {
++			cdscpi->process_response.return_qos_tag = skb->priority;
++			cdscpi->process_response.return_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
+ 
+ 			/*
+-			 * Copy over the return direction QoS
+-			 * and DSCP if the flow direction
+-			 * values are not set.
++			 * If UDP bi-di traffic is being run, it is possible that other direction's
++			 * QoS and DSCP values are also set by the subsequent packets before we push
++			 * the rule to NSS. So, let's update them, if they are not set.
+ 			 */
+-			if (dscpcte->flow_priority == 0) {
+-				flow_qos_tag = return_qos_tag;
+-			} else {
+-				flow_qos_tag = dscpcte->flow_priority;
++			if (cdscpi->process_response.flow_qos_tag == 0) {
++				cdscpi->process_response.flow_qos_tag = skb->priority;
+ 			}
+ 
+-			if (dscpcte->flow_dscp == 0) {
+-				flow_dscp = return_dscp;
+-			} else {
+-				flow_dscp = dscpcte->flow_dscp;
++			if (cdscpi->process_response.flow_dscp == 0) {
++				cdscpi->process_response.flow_dscp = ip_hdr->ds >> XT_DSCP_SHIFT;
+ 			}
+ 		}
+-		DEBUG_TRACE("UDP Flow DSCP: %x Flow priority: %d, Return DSCP: %x Return priority: %d sender: %d\n",
+-			    flow_dscp, flow_qos_tag, return_dscp, return_qos_tag, sender);
+-
+ 	}
+-	spin_unlock_bh(&ct->lock);
+-
+-	/*
+-	 * We are relevant to the connection
+-	 */
+-	became_relevant = ecm_db_time_get();
+-
+-	spin_lock_bh(&ecm_classifier_dscp_lock);
+-	cdscpi->process_response.relevance = ECM_CLASSIFIER_RELEVANCE_YES;
+-	cdscpi->process_response.became_relevant = became_relevant;
+-
+-	cdscpi->process_response.process_actions = ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+-	cdscpi->process_response.flow_qos_tag = flow_qos_tag;
+-	cdscpi->process_response.return_qos_tag = return_qos_tag;
++done:
++	cdscpi->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_QOS_TAG;
+ 
+ 	/*
+ 	 * IGS qostag values in conntrack are stored as per the direction of the flow.
+@@ -434,8 +474,6 @@ static void ecm_classifier_dscp_process(
+ 	 * Check if we need to set DSCP
+ 	 */
+ 	if (dscp_marked) {
+-		cdscpi->process_response.flow_dscp = flow_dscp;
+-		cdscpi->process_response.return_dscp = return_dscp;
+ 		cdscpi->process_response.process_actions |= ECM_CLASSIFIER_PROCESS_ACTION_DSCP;
+ 	}
+ 
+--- a/frontends/ecm_front_end_common.c
++++ b/frontends/ecm_front_end_common.c
+@@ -202,57 +202,16 @@ bool ecm_front_end_gre_proto_is_accel_al
+ 	DEBUG_TRACE("%p: GRE IPv%d pass through - allow acceleration\n", skb, ip_version);
+ 	return true;
+ }
+-
+ /*
+- * ecm_front_end_tcp_check_ct_and_fill_dscp()
+- *	Checks the conntrack status and fill the DSCP
+- *	extension entry for later use.
++ * ecm_front_end_get_slow_packet_count()
++ *	Gets the slow path packet count for the given connection.
+  */
+-bool ecm_front_end_tcp_check_ct_and_fill_dscp(struct nf_conn *ct,
+-					      struct ecm_tracker_ip_header *iph,
+-					      struct sk_buff *skb,
+-					      ecm_tracker_sender_type_t sender)
++uint64_t ecm_front_end_get_slow_packet_count(struct ecm_front_end_connection_instance *feci)
+ {
+-#ifdef ECM_CLASSIFIER_DSCP_ENABLE
+-	struct nf_ct_dscpremark_ext *dscpcte;
+-
+-	/*
+-	 * Extract the priority and DSCP from skb during the TCP handshake
+-	 * and store into ct extension for each direction.
+-	 */
+-	spin_lock_bh(&ct->lock);
+-	dscpcte = nf_ct_dscpremark_ext_find(ct);
+-	if (dscpcte && ct->proto.tcp.state != TCP_CONNTRACK_ESTABLISHED) {
+-		if (sender == ECM_TRACKER_SENDER_TYPE_SRC) {
+-			dscpcte->flow_priority = skb->priority;
+-			dscpcte->flow_dscp = iph->ds >> XT_DSCP_SHIFT;
+-			DEBUG_TRACE("%p: sender: %d flow priority: %d flow dscp: %d\n",
+-				    ct, sender, dscpcte->flow_priority, dscpcte->flow_dscp);
+-		} else {
+-			dscpcte->reply_priority =  skb->priority;
+-			dscpcte->reply_dscp = iph->ds >> XT_DSCP_SHIFT;
+-			DEBUG_TRACE("%p: sender: %d reply priority: %d reply dscp: %d\n",
+-				    ct, sender, dscpcte->reply_priority, dscpcte->reply_dscp);
+-		}
+-	}
+-	spin_unlock_bh(&ct->lock);
+-#endif
+-	/*
+-	 * Unconfirmed connection may be dropped by Linux at the final step,
+-	 * So we don't allow acceleration for the unconfirmed connections.
+-	 */
+-	if (!nf_ct_is_confirmed(ct)) {
+-		DEBUG_WARN("%p: Unconfirmed TCP connection\n", ct);
+-		return false;
+-	}
++	uint64_t slow_pkts;
+ 
+-	/*
+-	 * Don't try to manage a non-established connection.
+-	 */
+-	if (!test_bit(IPS_ASSURED_BIT, &ct->status)) {
+-		DEBUG_WARN("%p: Non-established TCP connection\n", ct);
+-		return false;
+-	}
+-
+-	return true;
++	spin_lock_bh(&feci->lock);
++	slow_pkts = feci->stats.slow_path_packets;
++	spin_unlock_bh(&feci->lock);
++	return slow_pkts;
+ }
+--- a/frontends/nss/ecm_nss_non_ported_ipv4.c
++++ b/frontends/nss/ecm_nss_non_ported_ipv4.c
+@@ -1,6 +1,6 @@
+ /*
+  **************************************************************************
+- * Copyright (c) 2014-2020 The Linux Foundation.  All rights reserved.
++ * Copyright (c) 2014-2021 The Linux Foundation.  All rights reserved.
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+  * above copyright notice and this permission notice appear in all copies.
+@@ -1885,6 +1885,9 @@ static int ecm_nss_non_ported_ipv4_conne
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+ 	return ecm_state_prefix_remove(sfi);
+ }
+@@ -1986,6 +1989,7 @@ unsigned int ecm_nss_non_ported_ipv4_pro
+ 							uint16_t l2_encap_proto)
+ {
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	int protocol;
+ 	int src_port;
+ 	int src_port_nat;
+@@ -2047,7 +2051,6 @@ unsigned int ecm_nss_non_ported_ipv4_pro
+ 		struct ecm_db_mapping_instance *mi[ECM_DB_OBJ_DIR_MAX];
+ 		struct ecm_db_node_instance *ni[ECM_DB_OBJ_DIR_MAX];
+ 		struct ecm_classifier_default_instance *dci;
+-		struct ecm_front_end_connection_instance *feci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+ 		int32_t to_list_first;
+@@ -2344,9 +2347,9 @@ done:
+ 	 * Check if IGS feature is enabled or not.
+ 	 */
+ 	if (unlikely(ecm_interface_igs_enabled)) {
+-		struct ecm_front_end_connection_instance *feci = ecm_db_connection_front_end_get_and_ref(ci);
+-		bool ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+-
++		bool ret;
++		feci = ecm_db_connection_front_end_get_and_ref(ci);
++		ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+ 		feci->deref(feci);
+ 		if (!ret) {
+ 			DEBUG_WARN("%p: Acceleration denied.\n", ci);
+@@ -2384,6 +2387,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2551,7 +2563,6 @@ done:
+ 	 */
+ 	if (protocol == IPPROTO_IPV6
+ 			&& prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_nss_non_ported_ipv4_sit_set_peer((struct ecm_nss_non_ported_ipv4_connection_instance *)feci, skb);
+@@ -2563,7 +2574,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_nss_non_ported_ipv4_connection_accelerate(feci, is_l2_encap, &prevalent_pr);
+--- a/frontends/nss/ecm_nss_non_ported_ipv6.c
++++ b/frontends/nss/ecm_nss_non_ported_ipv6.c
+@@ -1,6 +1,6 @@
+ /*
+  **************************************************************************
+- * Copyright (c) 2014-2020 The Linux Foundation.  All rights reserved.
++ * Copyright (c) 2014-2021 The Linux Foundation.  All rights reserved.
+  * Permission to use, copy, modify, and/or distribute this software for
+  * any purpose with or without fee is hereby granted, provided that the
+  * above copyright notice and this permission notice appear in all copies.
+@@ -1697,6 +1697,9 @@ static int ecm_nss_non_ported_ipv6_conne
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+  	return ecm_state_prefix_remove(sfi);
+ }
+@@ -1797,6 +1800,7 @@ unsigned int ecm_nss_non_ported_ipv6_pro
+ 							ip_addr_t ip_src_addr, ip_addr_t ip_dest_addr, uint16_t l2_encap_proto)
+ {
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	int protocol;
+ 	int src_port;
+ 	int dest_port;
+@@ -1851,7 +1855,6 @@ unsigned int ecm_nss_non_ported_ipv6_pro
+ 		struct ecm_db_mapping_instance *mi[ECM_DB_OBJ_DIR_MAX];
+ 		struct ecm_db_node_instance *ni[ECM_DB_OBJ_DIR_MAX];
+ 		struct ecm_classifier_default_instance *dci;
+-		struct ecm_front_end_connection_instance *feci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+ 		int32_t to_list_first;
+@@ -2075,9 +2078,9 @@ done:
+ 	 * Check if IGS feature is enabled or not.
+ 	 */
+ 	if (unlikely(ecm_interface_igs_enabled)) {
+-		struct ecm_front_end_connection_instance *feci = ecm_db_connection_front_end_get_and_ref(ci);
+-		bool ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+-
++		bool ret;
++		feci = ecm_db_connection_front_end_get_and_ref(ci);
++		ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+ 		feci->deref(feci);
+ 		if (!ret) {
+ 			DEBUG_WARN("%p: Acceleration denied.\n", ci);
+@@ -2115,6 +2118,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2276,7 +2288,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_nss_non_ported_ipv6_connection_accelerate(feci, &prevalent_pr, is_l2_encap);
+--- a/frontends/nss/ecm_nss_ported_ipv4.c
++++ b/frontends/nss/ecm_nss_ported_ipv4.c
+@@ -1920,6 +1920,9 @@ static int ecm_nss_ported_ipv4_connectio
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+ 	return ecm_state_prefix_remove(sfi);
+ }
+@@ -2023,6 +2026,7 @@ unsigned int ecm_nss_ported_ipv4_process
+ 	int dest_port;
+ 	int dest_port_nat;
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	ip_addr_t match_addr;
+ 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+ 	int aci_index;
+@@ -2032,12 +2036,22 @@ unsigned int ecm_nss_ported_ipv4_process
+ 	int protocol = (int)orig_tuple->dst.protonum;
+ 	__be16 *layer4hdr = NULL;
+ 
++	/*
++	 * Unconfirmed connection may be dropped by Linux at the final step,
++	 * So we don't allow acceleration for the unconfirmed connections.
++	 */
++	if (likely(ct) && !nf_ct_is_confirmed(ct)) {
++		DEBUG_WARN("%p: Unconfirmed UDP connection\n", ct);
++		return NF_ACCEPT;
++	}
++
+ 	if (protocol == IPPROTO_TCP) {
++
+ 		/*
+-		 * Check the conntrack status and the DSCP information.
++		 * Don't try to manage a non-established connection.
+ 		 */
+-		if (likely(ct) && !ecm_front_end_tcp_check_ct_and_fill_dscp(ct, iph, skb, sender)) {
+-			DEBUG_WARN("%p: TCP Conntrack is not ready for acceleration\n", ct);
++		if (likely(ct) && !test_bit(IPS_ASSURED_BIT, &ct->status)) {
++			DEBUG_WARN("%p: Non-established TCP connection\n", ct);
+ 			return NF_ACCEPT;
+ 		}
+ 
+@@ -2111,15 +2125,6 @@ unsigned int ecm_nss_ported_ipv4_process
+ 				ECM_IP_ADDR_TO_DOT(ip_dest_addr_nat), dest_port, dest_port_nat, ecm_dir);
+ 	} else if (protocol == IPPROTO_UDP) {
+ 		/*
+-		 * Unconfirmed connection may be dropped by Linux at the final step,
+-		 * So we don't allow acceleration for the unconfirmed connections.
+-		 */
+-		if (likely(ct) && !nf_ct_is_confirmed(ct)) {
+-			DEBUG_WARN("%p: Unconfirmed UDP connection\n", ct);
+-			return NF_ACCEPT;
+-		}
+-
+-		/*
+ 		 * Extract UDP header to obtain port information
+ 		 */
+ 		udp_hdr = ecm_tracker_udp_check_header_and_read(skb, iph, &udp_hdr_buff);
+@@ -2217,7 +2222,6 @@ unsigned int ecm_nss_ported_ipv4_process
+ 		struct ecm_classifier_default_instance *dci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+-		struct ecm_front_end_connection_instance *feci;
+ 		int32_t to_list_first;
+ 		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+ 		int32_t to_nat_list_first;
+@@ -2532,9 +2536,9 @@ done:
+ 	 * Check if IGS feature is enabled or not.
+ 	 */
+ 	if (unlikely(ecm_interface_igs_enabled)) {
+-		struct ecm_front_end_connection_instance *feci = ecm_db_connection_front_end_get_and_ref(ci);
+-		bool ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+-
++		bool ret;
++		feci = ecm_db_connection_front_end_get_and_ref(ci);
++		ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+ 		feci->deref(feci);
+ 		if (!ret) {
+ 			DEBUG_WARN("%p: Acceleration denied.\n", ci);
+@@ -2602,6 +2606,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2781,7 +2794,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_nss_ported_ipv4_connection_accelerate(feci, &prevalent_pr, is_l2_encap, ct, skb);
+--- a/frontends/nss/ecm_nss_ported_ipv6.c
++++ b/frontends/nss/ecm_nss_ported_ipv6.c
+@@ -1835,6 +1835,9 @@ static int ecm_nss_ported_ipv6_connectio
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+ 	return ecm_state_prefix_remove(sfi);
+ }
+@@ -1935,6 +1938,7 @@ unsigned int ecm_nss_ported_ipv6_process
+ 	int src_port;
+ 	int dest_port;
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	ip_addr_t match_addr;
+ 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+ 	int aci_index;
+@@ -1944,12 +1948,22 @@ unsigned int ecm_nss_ported_ipv6_process
+ 	int protocol = (int)orig_tuple->dst.protonum;
+ 	__be16 *layer4hdr = NULL;
+ 
++	/*
++	 * Unconfirmed connection may be dropped by Linux at the final step,
++	 * So we don't allow acceleration for the unconfirmed connections.
++	 */
++	if (likely(ct) && !nf_ct_is_confirmed(ct)) {
++		DEBUG_WARN("%p: Unconfirmed UDP connection\n", ct);
++		return NF_ACCEPT;
++	}
++
+ 	if (protocol == IPPROTO_TCP) {
++
+ 		/*
+-		 * Check the conntrack status and the DSCP information.
++		 * Don't try to manage a non-established connection.
+ 		 */
+-		if (likely(ct) && !ecm_front_end_tcp_check_ct_and_fill_dscp(ct, iph, skb, sender)) {
+-			DEBUG_WARN("%p: TCP Conntrack is not ready for acceleration\n", ct);
++		if (likely(ct) && !test_bit(IPS_ASSURED_BIT, &ct->status)) {
++			DEBUG_WARN("%p: Non-established TCP connection\n", ct);
+ 			return NF_ACCEPT;
+ 		}
+ 
+@@ -2002,14 +2016,6 @@ unsigned int ecm_nss_ported_ipv6_process
+ 		DEBUG_TRACE("TCP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, dir %d\n",
+ 				ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port, ecm_dir);
+ 	} else if (protocol == IPPROTO_UDP) {
+-		/*
+-		 * Unconfirmed connection may be dropped by Linux at the final step,
+-		 * So we don't allow acceleration for the unconfirmed connections.
+-		 */
+-		if (likely(ct) && !nf_ct_is_confirmed(ct)) {
+-			DEBUG_WARN("%p: Unconfirmed connection\n", ct);
+-			return NF_ACCEPT;
+-		}
+ 
+ 		/*
+ 		 * Extract UDP header to obtain port information
+@@ -2098,7 +2104,6 @@ unsigned int ecm_nss_ported_ipv6_process
+ 		struct ecm_classifier_default_instance *dci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+-		struct ecm_front_end_connection_instance *feci;
+ 		int32_t to_list_first;
+ 		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+ 		int32_t from_list_first;
+@@ -2348,9 +2353,9 @@ done:
+ 	 * Check if IGS feature is enabled or not.
+ 	 */
+ 	if (unlikely(ecm_interface_igs_enabled)) {
+-		struct ecm_front_end_connection_instance *feci = ecm_db_connection_front_end_get_and_ref(ci);
+-		bool ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+-
++		bool ret;
++		feci = ecm_db_connection_front_end_get_and_ref(ci);
++		ret = ecm_nss_common_igs_acceleration_is_allowed(feci, skb);
+ 		feci->deref(feci);
+ 		if (!ret) {
+ 			DEBUG_WARN("%p: Acceleration denied.\n", ci);
+@@ -2388,6 +2393,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2567,7 +2581,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_nss_ported_ipv6_connection_accelerate(feci, &prevalent_pr, ct, is_l2_encap, skb);
+--- a/frontends/sfe/ecm_sfe_ported_ipv4.c
++++ b/frontends/sfe/ecm_sfe_ported_ipv4.c
+@@ -1694,6 +1694,9 @@ static int ecm_sfe_ported_ipv4_connectio
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+  	return ecm_state_prefix_remove(sfi);
+ }
+@@ -1795,6 +1798,7 @@ unsigned int ecm_sfe_ported_ipv4_process
+ 	int dest_port;
+ 	int dest_port_nat;
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	ip_addr_t match_addr;
+ 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+ 	int aci_index;
+@@ -1804,12 +1808,22 @@ unsigned int ecm_sfe_ported_ipv4_process
+ 	int protocol = (int)orig_tuple->dst.protonum;
+ 	__be16 *layer4hdr = NULL;
+ 
++	/*
++	 * Unconfirmed connection may be dropped by Linux at the final step,
++	 * So we don't allow acceleration for the unconfirmed connections.
++	 */
++	if (likely(ct) && !nf_ct_is_confirmed(ct)) {
++		DEBUG_WARN("%p: Unconfirmed UDP connection\n", ct);
++		return NF_ACCEPT;
++	}
++
+ 	if (protocol == IPPROTO_TCP) {
++
+ 		/*
+-		 * Check the conntrack status and the DSCP information.
++		 * Don't try to manage a non-established connection.
+ 		 */
+-		if (likely(ct) && !ecm_front_end_tcp_check_ct_and_fill_dscp(ct, iph, skb, sender)) {
+-			DEBUG_WARN("%p: TCP Conntrack is not ready for acceleration\n", ct);
++		if (likely(ct) && !test_bit(IPS_ASSURED_BIT, &ct->status)) {
++			DEBUG_WARN("%p: Non-established TCP connection\n", ct);
+ 			return NF_ACCEPT;
+ 		}
+ 
+@@ -1882,14 +1896,6 @@ unsigned int ecm_sfe_ported_ipv4_process
+ 				ECM_IP_ADDR_TO_DOT(ip_src_addr), ECM_IP_ADDR_TO_DOT(ip_src_addr_nat), src_port, src_port_nat, ECM_IP_ADDR_TO_DOT(ip_dest_addr),
+ 				ECM_IP_ADDR_TO_DOT(ip_dest_addr_nat), dest_port, dest_port_nat, ecm_dir);
+ 	} else if (protocol == IPPROTO_UDP) {
+-		/*
+-		 * Unconfirmed connection may be dropped by Linux at the final step,
+-		 * So we don't allow acceleration for the unconfirmed connections.
+-		 */
+-		if (likely(ct) && !nf_ct_is_confirmed(ct)) {
+-			DEBUG_WARN("%p: Unconfirmed connection\n", ct);
+-			return NF_ACCEPT;
+-		}
+ 
+ 		/*
+ 		 * Extract UDP header to obtain port information
+@@ -1983,7 +1989,6 @@ unsigned int ecm_sfe_ported_ipv4_process
+ 		struct ecm_classifier_default_instance *dci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+-		struct ecm_front_end_connection_instance *feci;
+ 		int32_t to_list_first;
+ 		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+ 		int32_t to_nat_list_first;
+@@ -2314,6 +2319,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2464,7 +2478,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_sfe_ported_ipv4_connection_accelerate(feci, &prevalent_pr, is_l2_encap, ct);
+--- a/frontends/sfe/ecm_sfe_ported_ipv6.c
++++ b/frontends/sfe/ecm_sfe_ported_ipv6.c
+@@ -1638,6 +1638,9 @@ static int ecm_sfe_ported_ipv6_connectio
+ 	if ((result = ecm_state_write(sfi, "ae_nack_limit", "%d", stats.ae_nack_limit))) {
+ 		return result;
+ 	}
++	if ((result = ecm_state_write(sfi, "slow_path_packets", "%d", stats.slow_path_packets))) {
++		return result;
++	}
+ 
+  	return ecm_state_prefix_remove(sfi);
+ }
+@@ -1736,6 +1739,7 @@ unsigned int ecm_sfe_ported_ipv6_process
+ 	int src_port;
+ 	int dest_port;
+ 	struct ecm_db_connection_instance *ci;
++	struct ecm_front_end_connection_instance *feci;
+ 	ip_addr_t match_addr;
+ 	struct ecm_classifier_instance *assignments[ECM_CLASSIFIER_TYPES];
+ 	int aci_index;
+@@ -1745,12 +1749,22 @@ unsigned int ecm_sfe_ported_ipv6_process
+ 	int protocol = (int)orig_tuple->dst.protonum;
+ 	__be16 *layer4hdr = NULL;
+ 
++	/*
++	 * Unconfirmed connection may be dropped by Linux at the final step,
++	 * So we don't allow acceleration for the unconfirmed connections.
++	 */
++	if (likely(ct) && !nf_ct_is_confirmed(ct)) {
++		DEBUG_WARN("%p: Unconfirmed UDP connection\n", ct);
++		return NF_ACCEPT;
++	}
++
+ 	if (protocol == IPPROTO_TCP) {
++
+ 		/*
+-		 * Check the conntrack status and the DSCP information.
++		 * Don't try to manage a non-established connection.
+ 		 */
+-		if (likely(ct) && !ecm_front_end_tcp_check_ct_and_fill_dscp(ct, iph, skb, sender)) {
+-			DEBUG_WARN("%p: TCP Conntrack is not ready for acceleration\n", ct);
++		if (likely(ct) && !test_bit(IPS_ASSURED_BIT, &ct->status)) {
++			DEBUG_WARN("%p: Non-established TCP connection\n", ct);
+ 			return NF_ACCEPT;
+ 		}
+ 
+@@ -1803,14 +1817,6 @@ unsigned int ecm_sfe_ported_ipv6_process
+ 		DEBUG_TRACE("TCP src: " ECM_IP_ADDR_OCTAL_FMT ":%d, dest: " ECM_IP_ADDR_OCTAL_FMT ":%d, dir %d\n",
+ 				ECM_IP_ADDR_TO_OCTAL(ip_src_addr), src_port, ECM_IP_ADDR_TO_OCTAL(ip_dest_addr), dest_port, ecm_dir);
+ 	} else if (protocol == IPPROTO_UDP) {
+-		/*
+-		 * Unconfirmed connection may be dropped by Linux at the final step,
+-		 * So we don't allow acceleration for the unconfirmed connections.
+-		 */
+-		if (likely(ct) && !nf_ct_is_confirmed(ct)) {
+-			DEBUG_WARN("%p: Unconfirmed connection\n", ct);
+-			return NF_ACCEPT;
+-		}
+ 
+ 		/*
+ 		 * Extract UDP header to obtain port information
+@@ -1892,7 +1898,6 @@ unsigned int ecm_sfe_ported_ipv6_process
+ 		struct ecm_classifier_default_instance *dci;
+ 		struct ecm_db_connection_instance *nci;
+ 		ecm_classifier_type_t classifier_type;
+-		struct ecm_front_end_connection_instance *feci;
+ 		int32_t to_list_first;
+ 		struct ecm_db_iface_instance *to_list[ECM_DB_IFACE_HEIRARCHY_MAX];
+ 		int32_t from_list_first;
+@@ -2158,6 +2163,15 @@ done:
+ 	}
+ 
+ 	/*
++	 * Increment the slow path packet counter.
++	 */
++	feci = ecm_db_connection_front_end_get_and_ref(ci);
++	spin_lock_bh(&feci->lock);
++	feci->stats.slow_path_packets++;
++	spin_unlock_bh(&feci->lock);
++	feci->deref(feci);
++
++	/*
+ 	 * Iterate the assignments and call to process!
+ 	 * Policy implemented:
+ 	 * 1. Classifiers that say they are not relevant are unassigned and not actioned further.
+@@ -2308,7 +2322,6 @@ done:
+ 	 * Accelerate?
+ 	 */
+ 	if (prevalent_pr.accel_mode == ECM_CLASSIFIER_ACCELERATION_MODE_ACCEL) {
+-		struct ecm_front_end_connection_instance *feci;
+ 		DEBUG_TRACE("%p: accel\n", ci);
+ 		feci = ecm_db_connection_front_end_get_and_ref(ci);
+ 		ecm_sfe_ported_ipv6_connection_accelerate(feci, &prevalent_pr, ct, is_l2_encap);
