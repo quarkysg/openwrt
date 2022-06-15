@@ -42,7 +42,7 @@ Improves TCP throughput when the feature is enabled.
  
  static const struct ath10k_hw_params ath10k_hw_params_list[] = {
  	{
-@@ -3135,6 +3138,14 @@ static void ath10k_core_register_work(st
+@@ -3152,6 +3155,14 @@ static void ath10k_core_register_work(st
  	/* peer stats are enabled by default */
  	set_bit(ATH10K_FLAG_PEER_STATS, &ar->dev_flags);
  
@@ -78,7 +78,7 @@ Improves TCP throughput when the feature is enabled.
  };
 --- a/drivers/net/wireless/ath/ath10k/htt_tx.c
 +++ b/drivers/net/wireless/ath/ath10k/htt_tx.c
-@@ -1187,6 +1187,10 @@ static u8 ath10k_htt_tx_get_tid(struct s
+@@ -1190,6 +1190,10 @@ static u8 ath10k_htt_tx_get_tid(struct s
  	struct ieee80211_hdr *hdr = (void *)skb->data;
  	struct ath10k_skb_cb *cb = ATH10K_SKB_CB(skb);
  
@@ -89,7 +89,7 @@ Improves TCP throughput when the feature is enabled.
  	if (!is_eth && ieee80211_is_mgmt(hdr->frame_control))
  		return HTT_DATA_TX_EXT_TID_MGMT;
  	else if (cb->flags & ATH10K_SKB_F_QOS)
-@@ -1434,15 +1438,17 @@ static int ath10k_htt_tx_32(struct ath10
+@@ -1437,15 +1441,17 @@ static int ath10k_htt_tx_32(struct ath10
  	txbuf_paddr = htt->txbuf.paddr +
  		      (sizeof(struct ath10k_htt_txbuf_32) * msdu_id);
  
@@ -339,8 +339,8 @@ Improves TCP throughput when the feature is enabled.
 +
  	ath10k_htt_tx_free_msdu_id(htt, tx_done->msdu_id);
  	ath10k_htt_tx_dec_pending(htt);
- 	if (htt->num_pending_tx == 0)
-@@ -130,7 +133,11 @@ int ath10k_txrx_tx_unref(struct ath10k_h
+ 	spin_unlock_bh(&htt->tx_lock);
+@@ -128,7 +131,11 @@ int ath10k_txrx_tx_unref(struct ath10k_h
  		info->status.is_valid_ack_signal = true;
  	}
  
