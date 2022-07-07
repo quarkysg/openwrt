@@ -713,7 +713,7 @@
  }
  
  /* bond_mii_monitor
-@@ -4383,6 +4445,11 @@ static void bond_destructor(struct net_d
+@@ -4385,6 +4447,11 @@ static void bond_destructor(struct net_d
  	struct bonding *bond = netdev_priv(bond_dev);
  	if (bond->wq)
  		destroy_workqueue(bond->wq);
@@ -725,7 +725,7 @@
  }
  
  void bond_setup(struct net_device *bond_dev)
-@@ -4932,6 +4999,16 @@ int bond_create(struct net *net, const c
+@@ -4934,6 +5001,16 @@ int bond_create(struct net *net, const c
  	bond_work_init_all(bond);
  
  	rtnl_unlock();
@@ -742,7 +742,7 @@
  	return 0;
  }
  
-@@ -5027,6 +5104,203 @@ static void __exit bonding_exit(void)
+@@ -5029,6 +5106,203 @@ static void __exit bonding_exit(void)
  #endif
  }
  
@@ -1830,7 +1830,7 @@
  	struct fib_table *tb;
 --- a/net/ipv6/addrconf.c
 +++ b/net/ipv6/addrconf.c
-@@ -7187,3 +7187,35 @@ void addrconf_cleanup(void)
+@@ -7206,3 +7206,35 @@ void addrconf_cleanup(void)
  
  	destroy_workqueue(addrconf_wq);
  }
