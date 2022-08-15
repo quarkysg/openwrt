@@ -5,4 +5,19 @@
 / {
 	compatible = "linksys,ea7500-v2", "mediatek,mt7621-soc";
 	model = "Linksys EA7500 v2";
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		ramoops@f000000 {
+			compatible = "ramoops";
+			reg = <0xf000000 0x40000>;
+			record-size = <0x4000>;
+			console-size = <0x4000>;
+			ftrace-size = <0x4000>;
+			pmsg-size = <0x4000>;
+		};
+	};
 };
