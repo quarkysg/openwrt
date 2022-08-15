@@ -1396,6 +1396,7 @@ define Device/linksys_ea7500-v2
   DEVICE_MODEL := EA7500
   DEVICE_VARIANT := v2
   LINKSYS_HWNAME := EA7500v2
+  KERNEL_INITRAMFS := $(KERNEL_DTB) | uImage lzma
 endef
 TARGET_DEVICES += linksys_ea7500-v2
 
