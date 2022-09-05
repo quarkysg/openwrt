@@ -70,7 +70,7 @@
  #endif /* _CONNTRACK_PROTO_GRE_H */
 --- a/include/net/addrconf.h
 +++ b/include/net/addrconf.h
-@@ -497,4 +497,9 @@ int if6_proc_init(void);
+@@ -500,4 +500,9 @@ int if6_proc_init(void);
  void if6_proc_exit(void);
  #endif
  
@@ -82,7 +82,7 @@
  #endif
 --- a/drivers/net/tun.c
 +++ b/drivers/net/tun.c
-@@ -2861,6 +2861,8 @@ static int tun_set_iff(struct net *net,
+@@ -2872,6 +2872,8 @@ static int tun_set_iff(struct net *net,
  				     ~(NETIF_F_HW_VLAN_CTAG_TX |
  				       NETIF_F_HW_VLAN_STAG_TX);
  
