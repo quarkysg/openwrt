@@ -129,7 +129,7 @@
  
  #ifdef CONFIG_ETHERNET_PACKET_MANGLE
  	if (!dev->eth_mangle_tx ||
-@@ -4753,6 +4762,11 @@ void netdev_rx_handler_unregister(struct
+@@ -4754,6 +4763,11 @@ void netdev_rx_handler_unregister(struct
  }
  EXPORT_SYMBOL_GPL(netdev_rx_handler_unregister);
  
@@ -141,7 +141,7 @@
  /*
   * Limit the use of PFMEMALLOC reserves to those protocols that implement
   * the special handling of PFMEMALLOC skbs.
-@@ -4802,6 +4816,9 @@ static int __netif_receive_skb_core(stru
+@@ -4803,6 +4817,9 @@ static int __netif_receive_skb_core(stru
  	bool deliver_exact = false;
  	int ret = NET_RX_DROP;
  	__be16 type;
@@ -149,9 +149,9 @@
 +	int (*fast_recv)(struct sk_buff *skb);
 +#endif
  
- 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
+ 	net_timestamp_check(!READ_ONCE(netdev_tstamp_prequeue), skb);
  
-@@ -4842,6 +4859,16 @@ another_round:
+@@ -4843,6 +4860,16 @@ another_round:
  			goto out;
  	}
  
@@ -219,7 +219,7 @@
 +EXPORT_SYMBOL_GPL(br_dev_update_stats);
 --- a/net/netfilter/Kconfig
 +++ b/net/netfilter/Kconfig
-@@ -146,6 +146,14 @@
+@@ -145,6 +145,14 @@
  
  	  If unsure, say `N'.
  
