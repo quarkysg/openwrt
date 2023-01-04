@@ -359,7 +359,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  	struct work_struct csa_finalize_work;
  	bool csa_block_tx; /* write-protected by sdata_lock and local->mtx */
  	struct cfg80211_chan_def csa_chandef;
-@@ -1158,44 +1160,6 @@ enum mac80211_scan_state {
+@@ -1163,44 +1165,6 @@ enum mac80211_scan_state {
  	SCAN_ABORT,
  };
  
@@ -404,7 +404,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  DECLARE_STATIC_KEY_FALSE(aql_disable);
  
  struct ieee80211_local {
-@@ -1209,8 +1173,13 @@ struct ieee80211_local {
+@@ -1214,8 +1178,13 @@ struct ieee80211_local {
  	struct codel_params cparams;
  
  	/* protects active_txqs and txqi->schedule_order */
@@ -419,7 +419,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  	u32 aql_threshold;
  	atomic_t aql_total_pending_airtime;
  
-@@ -1630,125 +1599,6 @@ static inline bool txq_has_queue(struct
+@@ -1635,125 +1604,6 @@ static inline bool txq_has_queue(struct
  	return !(skb_queue_empty(&txqi->frags) && !txqi->tin.backlog_packets);
  }
  
@@ -545,7 +545,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  static inline int ieee80211_bssid_match(const u8 *raddr, const u8 *addr)
  {
  	return ether_addr_equal(raddr, addr) ||
-@@ -1992,14 +1842,6 @@ int ieee80211_tx_control_port(struct wip
+@@ -1997,14 +1847,6 @@ int ieee80211_tx_control_port(struct wip
  			      u64 *cookie);
  int ieee80211_probe_mesh_link(struct wiphy *wiphy, struct net_device *dev,
  			      const u8 *buf, size_t len);
@@ -594,7 +594,7 @@ Signed-off-by: Felix Fietkau <nbd@nbd.name>
  
 --- a/net/mac80211/rx.c
 +++ b/net/mac80211/rx.c
-@@ -1623,8 +1623,12 @@ static void sta_ps_start(struct sta_info
+@@ -1622,8 +1622,12 @@ static void sta_ps_start(struct sta_info
  
  	for (tid = 0; tid < IEEE80211_NUM_TIDS; tid++) {
  		struct ieee80211_txq *txq = sta->sta.txq[tid];

@@ -24,7 +24,7 @@ Signed-off-by: David Bauer <mail@david-bauer.net>
  
 -	capab = (u16)(amsdu << 0);	/* bit 0 A-MSDU support */
 +	capab = 0;
-+#ifdef CONFIG_MAC80211_MESH
++#ifdef CPTCFG_MAC80211_MESH
 +	if (!sta->mesh)
 +#endif
 +		capab = (u16)(amsdu << 0);	/* bit 0 A-MSDU support */
