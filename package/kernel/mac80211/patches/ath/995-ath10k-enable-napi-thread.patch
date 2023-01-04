@@ -1,0 +1,21 @@
+--- a/drivers/net/wireless/ath/ath10k/core.c
++++ b/drivers/net/wireless/ath/ath10k/core.c
+@@ -3384,6 +3384,9 @@ struct ath10k *ath10k_core_create(size_t
+ 		  ath10k_core_set_coverage_class_work);
+ 
+ 	init_dummy_netdev(&ar->napi_dev);
++	snprintf(ar->napi_dev.name, sizeof(ar->napi_dev.name), "%s",
++		 wiphy_name(ar->hw->wiphy));
++	ar->napi_dev.threaded = 1;
+ 
+ 	ret = ath10k_coredump_create(ar);
+ 	if (ret)
+@@ -3393,6 +3396,8 @@ struct ath10k *ath10k_core_create(size_t
+ 	if (ret)
+ 		goto err_free_coredump;
+ 
++	ath10k_info(ar, "NAPI thread enabled\n");
++
+ 	return ar;
+ 
+ err_free_coredump:
