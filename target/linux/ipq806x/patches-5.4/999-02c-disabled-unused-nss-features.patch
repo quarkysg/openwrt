@@ -1,0 +1,49 @@
+--- a/arch/arm/boot/dts/qcom-ipq8064.dtsi
++++ b/arch/arm/boot/dts/qcom-ipq8064.dtsi
+@@ -1598,23 +1598,23 @@
+ 			qcom,ipv4-reasm-enabled;
+ 			qcom,ipv6-enabled;
+ 			qcom,ipv6-reasm-enabled;
+-			qcom,l2tpv2-enabled;
+-			qcom,map-t-enabled;
++			qcom,l2tpv2-disabled;
++			qcom,map-t-disabled;
+ 			qcom,pppoe-enabled;
+-			qcom,pptp-enabled;
++			qcom,pptp-disabled;
+ 			qcom,portid-enabled;
+ 			qcom,shaping-enabled;
+ 			qcom,tun6rd-enabled;
+ 			qcom,tunipip6-enabled;
+ 			qcom,vlan-enabled;
+-			qcom,wlan-dataplane-offload-enabled;
+-			qcom,wlanredirect-enabled;
+-			qcom,pxvlan-enabled;
+-			qcom,vxlan-enabled;
+-			qcom,match-enabled;
+-			qcom,mirror-enabled;
+-			qcom,rmnet-enabled;
+-			qcom,clmap-enabled;
++			qcom,wlan-dataplane-offload-disabled;
++			qcom,wlanredirect-disabled;
++			qcom,pxvlan-disabled;
++			qcom,vxlan-disabled;
++			qcom,match-disabled;
++			qcom,mirror-disabled;
++			qcom,rmnet-disabled;
++			qcom,clmap-disabled;
+ 		};
+ 
+ 		nss1: nss@40800000 {
+@@ -1639,9 +1639,9 @@
+ 			qcom,num-queue = <2>;
+ 			qcom,turbo-frequency;
+ 
+-			qcom,capwap-enabled;
++			qcom,capwap-disabled;
+ 			qcom,crypto-enabled;
+-			qcom,dtls-enabled;
++			qcom,dtls-disabled;
+ 			qcom,ipsec-enabled;
+ 		};
+ 
